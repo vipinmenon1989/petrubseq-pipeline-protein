@@ -1,0 +1,644 @@
+{
+ "demo": "papalexi_eccite",
+ "accession": "GSE153056",
+ "experiment": "pooled ECCITE-seq screen (GSM4633614-GSM4633618)",
+ "created": "2026-09-25T16:20:20-04:00",
+ "tool": {
+  "script": "prepare_papalexi_demo.py",
+  "python": "3.11.16",
+  "numpy": "2.4.6",
+  "pandas": "2.3.3",
+  "scipy": "1.17.1"
+ },
+ "parameters": {
+  "n_cells": 1800,
+  "seed": 0,
+  "min_per_stratum": 8,
+  "hto_singlet_rule": "top >= 10 UMIs and top > 3.0 x second",
+  "guide_stratum_rule": "top >= 3 UMIs and top > 2.0 x second (dominant), else ambiguous/unassigned",
+  "sampling": "stratified by (hto_sample, target); proportional quotas with floor, largest strata trimmed to n_cells; numpy default_rng(seed).choice without replacement on sorted cells"
+ },
+ "sources": {
+  "rna": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633614_ECCITE_cDNA_counts.tsv.gz",
+   "size_bytes": 64135801,
+   "sha256": "2acb14a10b95f9b39536d0aec42896f30f6256332ccd336a2b01d037316b6080"
+  },
+  "adt": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633615_ECCITE_ADT_counts.tsv.gz",
+   "size_bytes": 196344,
+   "sha256": "e0f6f1dd1fc36d29580a5f5cf13f0d21a98a9b0d1ebb9479ed6291a355d4cb7f"
+  },
+  "adt_barcodes": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633615_ECCITE_ADT_Barcodes.csv.gz",
+   "size_bytes": 116,
+   "sha256": "5539405edc9488ba130db29bfeac5100f498d8bc618b88417045f02fd70caf5c"
+  },
+  "hto": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633616_ECCITE_HTO_counts.tsv.gz",
+   "size_bytes": 170306,
+   "sha256": "269069672fc09710136ea693e7702295c02f6c38aa824933eb4529a4c75944f5"
+  },
+  "gdo": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633618_ECCITE_GDO_counts.tsv.gz",
+   "size_bytes": 337680,
+   "sha256": "93c67d2a92fb98fcbdfe28b9a0ac94ffee08da035b112d5452ceaeacdcb7570a"
+  },
+  "gdo_barcodes": {
+   "path": "${DATA_ROOT}/ECCITE-seq/GSM4633618_ECCITE_GDO_Barcodes.csv.gz",
+   "size_bytes": 1242,
+   "sha256": "9e8b28b6a12922e355e4df8cc0a2a55bd8b700c5b5791800ec5bce1f4ab18dc8"
+  }
+ },
+ "source_summary": {
+  "n_cells": 20729,
+  "n_genes": 18649,
+  "n_antibodies": 4,
+  "n_guides": 111,
+  "cells_per_lane": {
+   "l1": 2185,
+   "l2": 2271,
+   "l3": 2390,
+   "l4": 2582,
+   "l5": 2178,
+   "l6": 3049,
+   "l7": 2976,
+   "l8": 3098
+  },
+  "hto_classes": {
+   "singlet": 17473,
+   "doublet_or_negative": 3256
+  },
+  "hto_samples_singlets": {
+   "rep1-tx": 6630,
+   "rep3-tx": 5576,
+   "rep4-tx": 5267
+  },
+  "preliminary_guide_call": {
+   "dominant": 19681,
+   "ambiguous": 1048,
+   "unassigned": 0
+  }
+ },
+ "strata": [
+  {
+   "hto_sample": "rep1-tx",
+   "target": "ATF2",
+   "eligible": 328,
+   "selected": 33
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "BRD4",
+   "eligible": 86,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "CAV1",
+   "eligible": 245,
+   "selected": 25
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "CD86",
+   "eligible": 357,
+   "selected": 36
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "CMTM6",
+   "eligible": 243,
+   "selected": 25
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "CUL3",
+   "eligible": 92,
+   "selected": 9
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "ETV7",
+   "eligible": 229,
+   "selected": 23
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "IFNGR1",
+   "eligible": 381,
+   "selected": 39
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "IFNGR2",
+   "eligible": 310,
+   "selected": 31
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "IRF1",
+   "eligible": 390,
+   "selected": 40
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "IRF7",
+   "eligible": 177,
+   "selected": 18
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "JAK2",
+   "eligible": 283,
+   "selected": 29
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "MARCH8",
+   "eligible": 295,
+   "selected": 30
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "MYC",
+   "eligible": 20,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "NFKBIA",
+   "eligible": 265,
+   "selected": 27
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "NT",
+   "eligible": 634,
+   "selected": 65
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "PDCD1LG2",
+   "eligible": 120,
+   "selected": 12
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "POU2F2",
+   "eligible": 209,
+   "selected": 21
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "SMAD4",
+   "eligible": 269,
+   "selected": 27
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "SPI1",
+   "eligible": 18,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "STAT1",
+   "eligible": 132,
+   "selected": 13
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "STAT2",
+   "eligible": 205,
+   "selected": 21
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "STAT3",
+   "eligible": 135,
+   "selected": 13
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "STAT5A",
+   "eligible": 187,
+   "selected": 19
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "TNFRSF14",
+   "eligible": 274,
+   "selected": 28
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "UBE2L6",
+   "eligible": 162,
+   "selected": 16
+  },
+  {
+   "hto_sample": "rep1-tx",
+   "target": "ambiguous",
+   "eligible": 584,
+   "selected": 60
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "ATF2",
+   "eligible": 302,
+   "selected": 31
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "BRD4",
+   "eligible": 129,
+   "selected": 13
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "CAV1",
+   "eligible": 260,
+   "selected": 26
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "CD86",
+   "eligible": 305,
+   "selected": 31
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "CMTM6",
+   "eligible": 225,
+   "selected": 23
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "CUL3",
+   "eligible": 61,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "ETV7",
+   "eligible": 246,
+   "selected": 25
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "IFNGR1",
+   "eligible": 294,
+   "selected": 30
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "IFNGR2",
+   "eligible": 338,
+   "selected": 34
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "IRF1",
+   "eligible": 179,
+   "selected": 18
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "IRF7",
+   "eligible": 157,
+   "selected": 16
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "JAK2",
+   "eligible": 249,
+   "selected": 25
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "MARCH8",
+   "eligible": 282,
+   "selected": 29
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "MYC",
+   "eligible": 36,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "NFKBIA",
+   "eligible": 173,
+   "selected": 17
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "NT",
+   "eligible": 678,
+   "selected": 67
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "PDCD1LG2",
+   "eligible": 234,
+   "selected": 24
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "POU2F2",
+   "eligible": 142,
+   "selected": 14
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "SMAD4",
+   "eligible": 121,
+   "selected": 12
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "SPI1",
+   "eligible": 5,
+   "selected": 5
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "STAT1",
+   "eligible": 94,
+   "selected": 9
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "STAT2",
+   "eligible": 165,
+   "selected": 16
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "STAT3",
+   "eligible": 151,
+   "selected": 15
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "STAT5A",
+   "eligible": 180,
+   "selected": 18
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "TNFRSF14",
+   "eligible": 259,
+   "selected": 26
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "UBE2L6",
+   "eligible": 156,
+   "selected": 16
+  },
+  {
+   "hto_sample": "rep3-tx",
+   "target": "ambiguous",
+   "eligible": 155,
+   "selected": 15
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "ATF2",
+   "eligible": 280,
+   "selected": 28
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "BRD4",
+   "eligible": 80,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "CAV1",
+   "eligible": 230,
+   "selected": 23
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "CD86",
+   "eligible": 301,
+   "selected": 31
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "CMTM6",
+   "eligible": 207,
+   "selected": 21
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "CUL3",
+   "eligible": 65,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "ETV7",
+   "eligible": 200,
+   "selected": 20
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "IFNGR1",
+   "eligible": 327,
+   "selected": 33
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "IFNGR2",
+   "eligible": 296,
+   "selected": 30
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "IRF1",
+   "eligible": 263,
+   "selected": 27
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "IRF7",
+   "eligible": 120,
+   "selected": 12
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "JAK2",
+   "eligible": 321,
+   "selected": 33
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "MARCH8",
+   "eligible": 221,
+   "selected": 22
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "MYC",
+   "eligible": 34,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "NFKBIA",
+   "eligible": 188,
+   "selected": 19
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "NT",
+   "eligible": 651,
+   "selected": 67
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "PDCD1LG2",
+   "eligible": 172,
+   "selected": 17
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "POU2F2",
+   "eligible": 148,
+   "selected": 15
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "SMAD4",
+   "eligible": 154,
+   "selected": 15
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "SPI1",
+   "eligible": 13,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "STAT1",
+   "eligible": 86,
+   "selected": 8
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "STAT2",
+   "eligible": 176,
+   "selected": 18
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "STAT3",
+   "eligible": 109,
+   "selected": 11
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "STAT5A",
+   "eligible": 166,
+   "selected": 17
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "TNFRSF14",
+   "eligible": 244,
+   "selected": 25
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "UBE2L6",
+   "eligible": 109,
+   "selected": 11
+  },
+  {
+   "hto_sample": "rep4-tx",
+   "target": "ambiguous",
+   "eligible": 106,
+   "selected": 10
+  }
+ ],
+ "selected": {
+  "n_cells": 1800,
+  "cells_per_lane": {
+   "l1": 143,
+   "l2": 173,
+   "l3": 183,
+   "l4": 185,
+   "l5": 221,
+   "l6": 284,
+   "l7": 279,
+   "l8": 332
+  },
+  "hto_samples": {
+   "rep1-tx": 684,
+   "rep3-tx": 571,
+   "rep4-tx": 545
+  },
+  "targets": {
+   "NT": 199,
+   "IFNGR1": 102,
+   "CD86": 98,
+   "IFNGR2": 95,
+   "ATF2": 92,
+   "JAK2": 87,
+   "IRF1": 85,
+   "ambiguous": 85,
+   "MARCH8": 81,
+   "TNFRSF14": 79,
+   "CAV1": 74,
+   "CMTM6": 69,
+   "ETV7": 68,
+   "NFKBIA": 63,
+   "STAT2": 55,
+   "STAT5A": 54,
+   "SMAD4": 54,
+   "PDCD1LG2": 53,
+   "POU2F2": 50,
+   "IRF7": 46,
+   "UBE2L6": 43,
+   "STAT3": 39,
+   "STAT1": 30,
+   "BRD4": 29,
+   "CUL3": 25,
+   "MYC": 24,
+   "SPI1": 21
+  }
+ },
+ "derived": {
+  "filtered_feature_bc_matrix": {
+   "n_features": 18764,
+   "n_cells": 1800,
+   "gene_expression": 18649,
+   "antibody_capture": 4,
+   "crispr_guide_capture": 111,
+   "nnz": 6347995
+  },
+  "cells_csv_columns": [
+   "lane",
+   "lane_group",
+   "hto_top_label",
+   "hto_top_count",
+   "hto_second_count",
+   "hto_class",
+   "hto_sample",
+   "stimulation",
+   "sampling_stratum_target"
+  ]
+ },
+ "notes": [
+  "All HTOs with signal are 'tx' (IFN-gamma stimulated) samples; stimulation is constant. Replicate naming is ambiguous between the two deposited HTO barcode files; hto_sample keeps the label of the count matrix verbatim.",
+  "No isotype-control antibodies exist in the panel.",
+  "Values are unchanged raw UMI counts; no normalization or QC filtering was applied."
+ ]
+}

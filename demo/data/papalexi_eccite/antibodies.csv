@@ -1,0 +1,5 @@
+feature_id,antibody_name,protein_name,gene_symbol,clone
+CD86,CD86,CD86 (B7-2),CD86,
+PDL1,PDL1,PD-L1 (CD274),CD274,
+PDL2,PDL2,PD-L2 (CD273),PDCD1LG2,
+CD366,CD366,TIM-3 (CD366),HAVCR2,

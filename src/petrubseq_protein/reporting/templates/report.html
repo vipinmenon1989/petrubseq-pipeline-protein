@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{{ ctx.title }}</title>
+<style>
+  :root { --fg:#1a202c; --muted:#4a5568; --line:#e2e8f0; --bg:#fff; --accent:#2b6cb0; --warn-bg:#fffaf0; --warn-line:#dd6b20; --card:#f7fafc; }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:15px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Helvetica,Arial,sans-serif; }
+  .wrap { max-width:1150px; margin:0 auto; padding:28px 24px 80px; }
+  header { border-bottom:3px solid var(--accent); padding-bottom:14px; margin-bottom:8px; }
+  h1 { font-size:26px; margin:0 0 4px; }
+  h2 { font-size:21px; margin:44px 0 4px; padding-top:14px; border-top:1px solid var(--line); }
+  h3 { font-size:16px; margin:26px 0 6px; color:var(--muted); }
+  .sub { color:var(--muted); font-size:13px; }
+  nav a { margin-right:14px; font-size:13px; }
+  table { border-collapse:collapse; width:100%; font-size:12.5px; margin:10px 0; }
+  th, td { border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top; }
+  th { background:var(--card); font-weight:600; }
+  tr:nth-child(even) td { background:#fcfdfe; }
+  .scroll { overflow:auto; max-height:480px; border:1px solid var(--line); }
+  .scroll table { margin:0; }
+  figure { margin:20px 0; }
+  figure img { max-width:100%; height:auto; border:1px solid var(--line); border-radius:4px; }
+  figcaption { font-size:12.5px; color:var(--muted); margin-top:5px; }
+  figcaption b { color:var(--fg); }
+  .cards { display:flex; flex-wrap:wrap; gap:10px; margin:16px 0; }
+  .card { flex:1 1 140px; background:var(--card); border:1px solid var(--line); border-radius:6px; padding:10px 12px; }
+  .card .v { font-size:20px; font-weight:600; }
+  .card .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
+  .warn { background:var(--warn-bg); border-left:4px solid var(--warn-line); padding:10px 14px; margin:14px 0; font-size:13.5px; border-radius:0 4px 4px 0; }
+  .note { background:var(--card); border-left:4px solid var(--accent); padding:10px 14px; margin:14px 0; font-size:13.5px; border-radius:0 4px 4px 0; }
+  code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
+  pre { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:12px; overflow-x:auto; line-height:1.4; }
+  details { margin:14px 0; } summary { cursor:pointer; font-weight:600; color:var(--accent); }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; } @media (max-width:900px) { .grid2 { grid-template-columns:1fr; } }
+</style>
+</head>
+<body><div class="wrap">
+<header>
+  <h1>{{ ctx.title }}</h1>
+  <div class="sub">Run <b>{{ ctx.run_name }}</b> (dataset {{ ctx.dataset }}) &middot; generated {{ ctx.generated_at }} &middot; petrubseq-pipeline-protein v{{ ctx.version }} &middot; preprocessing / QC report</div>
+  <nav><a href="#summary">Summary</a><a href="#inputs">1. Inputs</a><a href="#qc-rna">2. Cell &amp; RNA QC</a><a href="#qc-protein">3. Protein QC</a><a href="#qc-pert">4. Perturbation QC</a><a href="#rep">5. Representations</a>{% if pe %}<a href="#pe">6. Perturbation effects</a>{% endif %}<a href="#outputs">{{ 7 if pe else 6 }}. Outputs &amp; provenance</a></nav>
+</header>
+
+<h2 id="summary">Run summary</h2>
+<div class="cards">{% for k, v in ctx.cards %}<div class="card"><div class="v">{{ v }}</div><div class="k">{{ k }}</div></div>{% endfor %}</div>
+{% if ctx.warnings %}<div class="warn"><b>Warnings ({{ ctx.warnings|length }})</b><ul>{% for w in ctx.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% else %}<div class="note">No warnings were raised during this run.</div>{% endif %}
+{% for n in ctx.notes %}<div class="note">{{ n }}</div>{% endfor %}
+
+<h2 id="inputs">1. Inputs and modality audit</h2>
+<h3>1.1 Modalities</h3>{{ tables.inputs }}
+<h3>1.2 Input files</h3><div class="scroll">{{ tables.input_files }}</div>
+<h3>1.3 Cell alignment</h3>{{ tables.alignment }}
+
+<h2 id="qc-rna">2. Cell and RNA QC</h2>
+<p class="sub">Prefilter (qc.prefilter) removes obvious empty droplets and never-detected genes before metrics; strict filtering (qc.filter) applies the configured per-modality thresholds. Coverage of guides/targets is flagged, never filtered.</p>
+<h3>2.1 Filtering steps</h3>{{ tables.filtering_steps }}
+<h3>2.2 QC summary (after filtering)</h3>{{ tables.qc_summary }}
+<h3>2.3 RNA QC before filtering</h3>{% for f in figs.qc_rna_before %}{{ render(f) }}{% endfor %}
+<h3>2.4 RNA QC after filtering</h3>{% for f in figs.qc_rna_after %}{{ render(f) }}{% endfor %}
+
+<h2 id="qc-protein">3. Protein QC</h2>
+<h3>3.1 Protein representations and features</h3>{{ tables.protein_info }}
+<div class="scroll">{{ tables.protein_features }}</div>
+<h3>3.2 Protein QC summary</h3>{{ tables.protein_qc }}
+<h3>3.3 Protein QC before filtering</h3>{% for f in figs.qc_protein_before %}{{ render(f) }}{% endfor %}
+<h3>3.4 Protein QC after filtering</h3>{% for f in figs.qc_protein_after %}{{ render(f) }}{% endfor %}
+
+<h2 id="qc-pert">4. Perturbation QC</h2>
+<p class="sub">Classes: single_targeting, single_control (control_class = non_targeting / intergenic / ...), multi_targeting, multi_control, mixed_control_targeting, ambiguous (guide counts present but no dominant guide; count-derived calls only), unassigned. Multi-guide, ambiguous and unassigned cells are kept unless qc.filter.perturbation.cells says otherwise.</p>
+<h3>4.1 Perturbation QC summary</h3>{{ tables.perturbation_qc }}
+<h3>4.2 Class by condition</h3>{{ tables.class_by_condition }}
+<h3>4.3 Guides per cell</h3>{{ tables.moi_summary }}
+<h3>4.4 Lowest-coverage targets</h3><div class="scroll">{{ tables.target_coverage }}</div>
+<h3>4.5 Figures</h3>{% for f in figs.qc_perturbation %}{{ render(f) }}{% endfor %}
+
+<h2 id="rep">5. Representations</h2>
+<h3>5.1 RNA</h3>{{ tables.rep_rna }}{% for f in figs.rep_rna %}{{ render(f) }}{% endfor %}
+<h3>5.2 Protein</h3>{{ tables.rep_protein }}{% for f in figs.rep_protein %}{{ render(f) }}{% endfor %}
+<h3>5.3 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
+{% for name, df in group_summaries %}<h3>{{ name }} summary</h3><div class="scroll">{{ df }}</div>{% endfor %}
+
+{% if pe %}
+<h2 id="pe">6. Perturbation effects</h2>
+<p class="sub">Downstream analyses on the processed object. Perturbed cells = single-guide targeting cells of one target; controls = single-guide non-targeting cells; ambiguous and multi-guide cells are excluded. <b>Perturbation target</b> = the gene the guide acts on; <b>response genes</b> = genes that change downstream; <b>gene program</b> (P) = a cluster of co-responding genes; <b>perturbation module</b> (M) = a cluster of perturbations with similar responses. Associations below are correlations, not evidence of mediation or causality; methods and references in docs/PERTURBATION_EFFECTS.md.</p>
+<h3>6.1 Perturbation-response score (PS)</h3>{{ pe.info.ps }}{{ pe.ps }}{% for f in figs.pe_ps %}{{ render(f) }}{% endfor %}<details><summary>Targets not scored</summary>{{ pe.ps_skipped }}</details>
+<h3>6.2 lochNESS</h3>{{ pe.info.lochness }}{{ pe.lochness }}{% for f in figs.pe_lochness %}{{ render(f) }}{% endfor %}
+<h3>6.3 Gene programs and perturbation modules</h3>{{ pe.info.modules }}<h4>Perturbation modules</h4>{{ pe.modules }}<h4>Gene programs (top 10 genes per program by |log2FC|)</h4>{{ pe.programs }}{% for f in figs.pe_gene_programs %}{{ render(f) }}{% endfor %}
+<h3>6.4 Protein effects</h3>{{ pe.info.protein }}{{ pe.protein }}{% for f in figs.pe_protein_effects %}{{ render(f) }}{% endfor %}
+<h3>6.5 RNA-protein concordance</h3>{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
+<h3>6.6 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
+{% endif %}
+<h2 id="outputs">{{ 7 if pe else 6 }}. Outputs and provenance</h2>
+<h3>6.1 Deliverables</h3>{{ tables.outputs }}
+<h3>6.2 Processed object</h3><pre>{{ ctx.adata_repr }}</pre>{{ tables.schema }}
+<h3>6.3 Stage timings (seconds)</h3>{{ tables.timings }}
+<details><summary>Table manifest ({{ n_tables }} tables)</summary>{{ tables.table_manifest }}</details>
+<details><summary>Figure manifest ({{ n_figures }} figures)</summary><div class="scroll">{{ tables.figure_manifest }}</div></details>
+<details><summary>Resolved configuration</summary><pre>{{ ctx.config_yaml }}</pre></details>
+<details><summary>Software versions</summary>{{ tables.versions }}</details>
+<details><summary>Provenance</summary>{{ tables.provenance }}</details>
+<footer class="sub" style="margin-top:40px">petrubseq-pipeline-protein v{{ ctx.version }}. Preprocessing/QC report only: no perturbation-effect, concordance or predictive analyses are included.</footer>
+</div></body></html>

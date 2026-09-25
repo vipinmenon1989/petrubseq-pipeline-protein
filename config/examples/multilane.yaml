@@ -1,0 +1,40 @@
+# Example: several 10x lanes of the same library design. Cell IDs become
+# <barcode>__<lane id> (obs['barcode_original'] and obs['lane_id'] keep the
+# parts); a per-lane sample sheet is joined onto the cells by lane_id so its
+# columns can be mapped through `columns.*`.
+
+dataset:
+  name: my_multilane
+  input_dir: ${DATA_ROOT}/my_multilane
+
+inputs:
+  multiplexed:
+    format: 10x_h5                         # same for mtx directories
+    lanes:
+      - {id: lane1, path: lane1/filtered_feature_bc_matrix.h5}
+      - {id: lane2, path: lane2/filtered_feature_bc_matrix.h5}
+      - {id: lane3, path: lane3/filtered_feature_bc_matrix.h5}
+    feature_types:
+      rna: [Gene Expression]
+      protein: [Antibody Capture]
+      guide: [CRISPR Guide Capture]
+    var_names: name
+  lane_metadata:
+    file: lanes.csv                        # lane_id,condition,donor,... (one row per lane, all lanes present)
+    lane_column: lane_id
+  metadata:
+    file: null                             # optional per-cell table keyed by the global IDs (AAAC...-1__lane1)
+
+columns:
+  cell_id: cell
+  condition: condition                     # from lanes.csv
+  donor: donor
+  lane: null                               # obs['lane_id'] is always written for multi-lane inputs
+
+perturbation:
+  assignment:
+    source: guide_counts
+    method: dominant
+
+output:
+  dir: ${RESULTS_ROOT}/my_multilane

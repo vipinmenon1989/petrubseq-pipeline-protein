@@ -1,0 +1,130 @@
+# Papalexi et al. 2021 ECCITE-seq demo (GEO GSE153056, pooled screen
+# GSM4633614-GSM4633618): the deterministic 1,800-cell subset BUNDLED in this
+# repository under demo/data/papalexi_eccite/ (~22 MB; provenance in its
+# README.md and demo_manifest.json). It runs from a fresh clone:
+#   petrubseq-protein run --config config/demo_papalexi.yaml
+# Rebuilding the subset from the public GEO files (maintainers only):
+#   python demo/fetch_papalexi_data.py --dest ${DATA_ROOT}/ECCITE-seq
+#   python demo/prepare_papalexi_demo.py --source ${DATA_ROOT}/ECCITE-seq --output ${DATA_ROOT}/demo/papalexi_eccite
+# Processing uses the generic Stage C architecture (10x-style combined MTX read
+# once and split by feature type). Dataset facts: docs/datasets/PAPALEXI_ECCITE_AUDIT.md.
+# Every key not listed keeps the public default (docs/DEFAULTS.md).
+
+run:
+  name: papalexi_eccite_demo
+
+dataset:
+  name: papalexi_eccite
+  input_dir: ${REPO_ROOT}/demo/data/papalexi_eccite   # bundled demo; ${REPO_ROOT} = this repository (parent of config/)
+  description: >
+    Papalexi et al. 2021 (Nat Genet 53:322) pooled ECCITE-seq CRISPR screen in
+    IFN-gamma stimulated THP-1 cells: RNA + 4 ADTs (CD86, PD-L1, PD-L2, CD366)
+    + 111 sgRNAs (25 gene targets, non-targeting and eGFP controls). Demo subset
+    of one coherent experiment; raw UMI counts for every modality.
+
+inputs:
+  multiplexed:
+    format: mtx
+    path: filtered_feature_bc_matrix
+    feature_types:
+      rna: [Gene Expression]
+      protein: [Antibody Capture]        # raw ADT counts -> CLR + count-based QC
+      guide: [CRISPR Guide Capture]      # -> obsm['guide_counts'] + guide calling
+    var_names: id                        # feature IDs are the gene symbols (unique)
+  protein:
+    required: true                       # satisfied by the raw ADT counts (no normalized matrix exists)
+  metadata:
+    file: cells.csv                      # per-cell metadata from the preparation script (lane, HTO demultiplexing)
+    format: auto
+
+columns:
+  cell_id: cell
+  condition: stimulation                 # constant 'IFNg': every hashed sample with signal is a 'tx' sample
+  sample: hto_sample                     # HTO label as deposited (replicate naming is ambiguous; see the audit)
+  lane: lane                             # 10x lane from the barcode prefix l1-l8
+  batch: lane_group                      # lanes 1-4 vs 5-8 (different HTO barcode sets)
+  rna_total_counts: null                 # raw counts: library size is computed
+  keep: [hto_class, hto_top_count, sampling_stratum_target]
+
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)g(?P<index>\\d+)$"   # PDL1g1 -> PDL1, NTg5 -> NT
+  guide_target_table: guide_targets.csv                    # explicit mapping written by the preparation script
+  control_classes:
+    non_targeting: ["^NT$"]
+    transgene: ["^eGFP$"]                # eGFP-targeting guide: control for a non-expressed transgene
+  min_cells_per_guide: 10
+  min_cells_per_target: 10
+  assignment:
+    source: auto                         # only guide counts exist -> guide_counts
+    method: dominant                     # reference rule: top >= 3 UMIs and > 2 x runner-up; else ambiguous/unassigned
+    min_umi: 3
+    dominance_ratio: 2.0
+    max_second_umi: -1
+    detection_min_umi: 3
+
+alignment:
+  required: [rna, protein, metadata]     # 'protein' is satisfied by the ADT counts
+
+rna:
+  input_state: raw_counts                # verified integer UMI counts (audit)
+  n_pcs: 30                              # ~1,800 cells: 30 PCs (50 is the large-dataset default)
+
+protein:
+  normalization: auto                    # -> clr (per-protein across cells)
+  extra_representations: []
+  isotype_patterns: ["IgG"]              # no isotype control exists in this 4-antibody panel (documented)
+  feature_table: antibodies.csv          # antibody_name / protein_name / gene_symbol; clone not deposited
+  n_pcs: 3                               # 4 antibodies -> at most 3 informative PCs
+
+umap:
+  min_features: 3                        # allow the protein UMAP on the 4-antibody panel (default 5)
+  color_by: [perturbation_class, hto_sample]
+
+qc:
+  prefilter: {enabled: true, min_genes_per_cell: 200, min_cells_per_gene: 3}   # public defaults
+  filter:
+    enabled: true
+    rna: {min_genes: 500, max_pct_mt: 20.0}                                   # public defaults
+    perturbation: {cells: all}
+
+report:
+  title: "Papalexi ECCITE-seq demo - Perturb-CITE-seq preprocessing report"
+
+compute:
+  n_jobs: 4
+  seed: 0
+
+output:
+  dir: ${RESULTS_ROOT}/demo/papalexi_eccite
+  h5ad_name: papalexi_eccite_demo_processed.h5ad
+
+# Stage E: perturbation-effect analyses (off by default in generic configs;
+# enabled here for the demo). Methods and references: docs/PERTURBATION_EFFECTS.md.
+analysis:
+  perturbation_effects:
+    enabled: true
+    control_classes: [non_targeting]     # the NT guides; eGFP (transgene) cells are neither perturbed nor control
+    target_gene_map:
+      PDL1: CD274                        # dataset label -> RNA gene symbol (every other target label is its gene symbol)
+    top_n_report: 12
+    ps:
+      top_n_genes: 100                   # reference defaults (PS_python / pertps)
+      scale_factor: 3.0
+      ps_threshold: 0.5
+      min_cells_per_target: 10
+    lochness:
+      n_neighbors: 300                   # reference default; capped at 0.1 x 1,800 = 180 neighbours for the demo (recorded)
+      max_k_fraction: 0.1
+      n_pcs: 20
+      n_permutations: 200
+    modules:
+      min_cells_per_perturbation: 20     # reference default: targets with >= 20 single-guide cells
+      n_programs: 4                      # reference default
+      n_modules: 9                       # reference default
+      log2fc_pseudocount: 1.0            # generic default (Seurat FoldChange); reference used 1e-9 (docs/PERTURBATION_EFFECTS.md)
+      min_pct_cells_expressing: 5.0      # generic default
+    protein:
+      representation: protein            # CLR of the ADT counts (never the counts themselves)
+      min_cells_per_target: 10
+    concordance:
+      min_cells: 20
