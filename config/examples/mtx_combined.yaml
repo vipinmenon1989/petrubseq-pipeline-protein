@@ -1,0 +1,47 @@
+# Example: one Cell Ranger "filtered_feature_bc_matrix" directory that holds
+# gene expression, antibody (ADT) and CRISPR guide counts; guides are called
+# from the guide-count matrix. Every key not listed keeps the documented default
+# (`petrubseq-protein init-config defaults.yaml` writes them all).
+
+dataset:
+  name: my_perturb_cite
+  input_dir: ${DATA_ROOT}/my_perturb_cite
+
+inputs:
+  multiplexed:
+    format: mtx                          # mtx | 10x_h5 | h5ad
+    path: filtered_feature_bc_matrix     # relative to dataset.input_dir
+    feature_types:                       # 10x feature_types labels -> modality
+      rna: [Gene Expression]
+      protein: [Antibody Capture]        # always raw ADT counts -> CLR, count-based QC
+      guide: [CRISPR Guide Capture]      # -> obsm['guide_counts'] + guide calling
+    var_names: name                      # RNA indexed by gene symbol (mito/ribo prefixes); antibodies/guides keep their IDs
+  protein:
+    required: true                       # a protein representation must exist (counts OR normalized values)
+  metadata:
+    file: cells.csv                      # optional per-cell table keyed by columns.cell_id (10x barcodes)
+    format: auto
+
+columns:
+  cell_id: barcode
+  condition: condition
+
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)_(?P<index>\\d+)$"   # GENE_1 -> GENE
+  control_classes:
+    non_targeting: ["^NO_SITE$", "^NTC$", "^non[-_ ]?targeting"]
+  assignment:
+    source: auto        # only guide counts exist -> guide_counts (auto fails when a provided list also exists)
+    method: dominant    # one guide per cell: top >= min_umi and top > dominance_ratio x second; else ambiguous / unassigned
+    min_umi: 3
+    dominance_ratio: 2.0
+    max_second_umi: -1  # -1 = no multiplet gate
+    detection_min_umi: 3  # obs['guides_detected'] / n_guides_detected; the 'threshold' method assigns every detected guide
+
+protein:
+  normalization: auto            # -> clr (raw counts)
+  isotype_patterns: ["IgG"]
+  feature_table: antibodies.csv  # optional: feature_id, antibody_name, protein_name, gene_symbol, clone, isotype
+
+output:
+  dir: ${RESULTS_ROOT}/my_perturb_cite

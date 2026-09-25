@@ -1,0 +1,36 @@
+# Example: an AnnData produced upstream, with the modalities in named slots.
+# obsm matrices need feature names: a DataFrame carries them as columns; a plain
+# array needs uns['<key>_features'] (a list). Value states are declared, never
+# guessed silently (rna_state auto = detected from the values).
+
+dataset:
+  name: my_h5ad
+  input_dir: ${DATA_ROOT}/my_h5ad
+
+inputs:
+  multiplexed:
+    format: h5ad
+    path: experiment.h5ad
+    rna_state: raw_counts
+    slots:
+      rna: {slot: layers, key: counts}            # or {slot: X}
+      protein_counts: {slot: obsm, key: adt_counts}
+      protein: {slot: obsm, key: adt_clr}         # optional provided normalized values
+      guide_counts: {slot: obsm, key: guide_counts}
+      guide_assignments: {slot: obs, key: guide_call, list_separator: ";"}
+  # Alternative for an h5ad whose var carries a feature-type column (as written by
+  # scanpy.read_10x_* with gex_only=False): omit `slots` and set
+  #   feature_types: {rna: [Gene Expression], protein: [Antibody Capture], guide: [CRISPR Guide Capture]}
+  #   feature_type_column: feature_types
+
+perturbation:
+  assignment:
+    source: provided               # obs['guide_call'] drives the assignment; counts are compared
+    method: dominant
+
+protein:
+  normalization: auto              # provided values are primary; CLR of counts is added as obsm['protein_clr']
+  embedding_representation: auto   # -> clr
+
+output:
+  dir: ${RESULTS_ROOT}/my_h5ad

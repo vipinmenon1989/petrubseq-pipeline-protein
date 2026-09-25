@@ -1,0 +1,41 @@
+# Example: modalities quantified separately (e.g. STARsolo / kallisto-bustools
+# runs): one MTX directory per modality. Cell barcodes must match across the
+# directories; cells missing from an optional modality are kept (NaN / zero
+# rows, flagged). A provided guide list is used for the assignment and the
+# guide counts feed diagnostics and a provided-vs-counts comparison.
+
+dataset:
+  name: my_separate_run
+  input_dir: ${DATA_ROOT}/my_separate_run
+
+inputs:
+  rna:
+    format: mtx
+    file: rna/filtered            # directory with barcodes.tsv[.gz], features.tsv[.gz], matrix.mtx[.gz]
+    var_names: name
+  protein_counts:
+    format: mtx
+    file: adt/filtered
+    required: false
+  protein:
+    required: true                # satisfied by protein_counts (no normalized matrix here)
+  guide_counts:
+    format: mtx
+    file: guides/filtered
+    required: false
+  guide_assignments:
+    file: guide_calls.tsv         # cell, guides (comma-separated) from an upstream caller
+    cell_column: cell
+    guides_column: guides
+    list_separator: ","
+
+alignment:
+  required: [rna, protein]        # 'protein' = counts or normalized values
+
+perturbation:
+  assignment:
+    source: provided              # both sources exist: choose explicitly (auto would fail)
+    method: dominant              # rule used for the comparison / obs['guide_dominant_call']
+
+output:
+  dir: ${RESULTS_ROOT}/my_separate_run

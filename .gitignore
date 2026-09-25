@@ -1,0 +1,127 @@
+# ============================================================
+# petrubseq-pipeline-protein
+# GitHub repository policy:
+#
+# Track only:
+#   - Python source code
+#   - SLURM scripts
+#   - YAML configuration
+#   - Markdown documentation
+#   - HTML documentation/reports
+#   - selected lightweight PNG figures
+#
+# Everything else stays on HPC.
+# ============================================================
+
+
+# ------------------------------------------------------------
+# IGNORE EVERYTHING BY DEFAULT
+# ------------------------------------------------------------
+*
+
+# But allow Git to traverse directories
+!*/
+
+
+# ------------------------------------------------------------
+# Repository metadata
+# ------------------------------------------------------------
+!.gitignore
+!LICENSE
+
+
+# ------------------------------------------------------------
+# Python source
+# ------------------------------------------------------------
+!*.py
+
+
+# ------------------------------------------------------------
+# SLURM scripts
+# ------------------------------------------------------------
+!*.slurm
+!*.sbatch
+
+
+# ------------------------------------------------------------
+# Configuration
+# ------------------------------------------------------------
+!*.yaml
+!*.yml
+
+
+# ------------------------------------------------------------
+# Documentation
+# ------------------------------------------------------------
+!*.md
+!*.html
+!*.ipynb
+
+
+# ------------------------------------------------------------
+# Selected lightweight PNG figures only
+#
+# Put figures intended for GitHub in one of these directories.
+# PNG files elsewhere remain ignored.
+# ------------------------------------------------------------
+!docs/*.png
+!docs/**/*.png
+
+!figures/*.png
+!figures/**/*.png
+
+!assets/*.png
+!assets/**/*.png
+
+
+# ------------------------------------------------------------
+# Bundled public demo input (frozen, ~22 MB): the deterministic 1,800-cell
+# Papalexi ECCITE-seq subset. ONLY these files are tracked; every other
+# data/matrix file stays ignored (data/, results/, *.h5ad, logs, caches).
+# ------------------------------------------------------------
+!demo/data/papalexi_eccite/README.md
+!demo/data/papalexi_eccite/demo_manifest.json
+!demo/data/papalexi_eccite/cells.csv
+!demo/data/papalexi_eccite/antibodies.csv
+!demo/data/papalexi_eccite/guide_targets.csv
+!demo/data/papalexi_eccite/selected_cells.txt
+!demo/data/papalexi_eccite/filtered_feature_bc_matrix/barcodes.tsv.gz
+!demo/data/papalexi_eccite/filtered_feature_bc_matrix/features.tsv.gz
+!demo/data/papalexi_eccite/filtered_feature_bc_matrix/matrix.mtx.gz
+
+
+# ------------------------------------------------------------
+# Explicitly keep large/data/output directories ignored
+# These rules are mostly defensive because of the whitelist
+# above.
+# ------------------------------------------------------------
+# root-level data/ only, so that demo/data/papalexi_eccite (whitelisted above) stays tracked
+/data/
+raw_data/
+processed_data/
+results/
+output/
+outputs/
+scratch/
+tmp/
+temp/
+cache/
+logs/
+
+
+# ------------------------------------------------------------
+# Python / IDE junk
+# ------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+.vscode/
+.idea/
+.DS_Store
+!pyproject.toml
