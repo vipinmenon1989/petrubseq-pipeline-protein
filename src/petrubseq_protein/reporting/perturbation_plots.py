@@ -546,30 +546,132 @@ def lochness_figures(lo, adata, cfg, reg: FigureRegistry) -> None:
 
 
 # ---------------------------------------------------------------------------- protein extension
+def _group_means(values: pd.Series, groups: np.ndarray, mask_p: np.ndarray, mask_c: np.ndarray, min_cells: int = 5):
+    """Descriptive per-level (perturbed mean - control mean) for the consistency panels; the statistic is in the table."""
+    out = {}
+    for g in np.unique(groups[mask_p | mask_c]):
+        mp, mc = mask_p & (groups == g), mask_c & (groups == g)
+        if mp.sum() >= min_cells and mc.sum() >= min_cells:
+            out[str(g)] = (float(values[mp].mean() - values[mc].mean()), int(mp.sum()), int(mc.sum()))
+    return out
+
+
 def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
     pr = res.protein
-    alpha = cfg.analysis.perturbation_effects.concordance.fdr_alpha
-    ps, mo = res.ps, res.modules
+    alpha_c = cfg.analysis.perturbation_effects.concordance.fdr_alpha
+    alpha_p = cfg.analysis.perturbation_effects.protein.fdr_alpha
+    ps, mo, lo = res.ps, res.modules, res.lochness
+    obs = adata.obs
+    P = adata.obsm.get(cfg.analysis.perturbation_effects.protein.representation)
     if pr is not None and not pr.empty:
+        tbl = pr.table
+        # --- 1. target x protein heatmap ---------------------------------------------------------
         D = pr.d_matrix.copy()
         order = D.abs().max(axis=1).sort_values(ascending=False).index
         D = D.loc[order]
-        F = pr.fdr_matrix.loc[order, D.columns] < cfg.analysis.perturbation_effects.protein.fdr_alpha
+        F = pr.fdr_matrix.loc[order, D.columns] < alpha_p
         fig, ax = plt.subplots(figsize=(1.8 + 0.7 * D.shape[1], 1.2 + 0.2 * D.shape[0]))
         _heatmap(ax, D, label="Cohen's d (perturbed - control)", marks=F)
         ax.set_title("perturbation x protein", fontsize=9)
         fig.tight_layout()
-        reg.save(fig, "protein_effect_heatmap", SECTION, ST_PROT, "Protein effects", f"Standardized effect (Cohen's d) of each perturbation on each measured protein ({pr.info.get('representation')} values vs non-targeting controls); * = BH-FDR < {cfg.analysis.perturbation_effects.protein.fdr_alpha} (Mann-Whitney U).")
+        reg.save(fig, "protein_effect_heatmap", SECTION, ST_PROT, "Protein effects", f"Standardized effect (Cohen's d) of each perturbation on each measured protein ({pr.info.get('representation')} values vs non-targeting controls); * = BH-FDR < {alpha_p} (Mann-Whitney U). Rows ordered by the largest |d|.")
+        # --- 2. ranked protein effects -------------------------------------------------------------
+        rk = tbl.assign(abs_d=tbl["cohen_d"].abs()).sort_values("abs_d", ascending=False).head(40)
+        fig, ax = plt.subplots(figsize=(max(6, 0.22 * len(rk)), 3.8))
+        ax.bar(range(len(rk)), rk["cohen_d"], color=[HIT_RED if s_ else GREY for s_ in rk["significant"]])
+        ax.axhline(0, color="black", lw=0.8)
+        ax.set_xticks(range(len(rk))); ax.set_xticklabels([f"{t}:{p_}" for t, p_ in zip(rk["target"], rk["protein"])], rotation=90, fontsize=6)
+        ax.set_ylabel("Cohen's d"); ax.set_title(f"Ranked target x protein effects (top {len(rk)} of {len(tbl)} tests; red = FDR < {alpha_p})", fontsize=10)
+        despine(ax)
+        fig.tight_layout()
+        reg.save(fig, "protein_effects_ranked", SECTION, ST_PROT, "Ranked protein effects", f"Target x protein pairs ranked by |Cohen's d| over all {len(tbl)} tests; red bars are significant at BH-FDR < {alpha_p}. Every pair is in protein_effects.csv.")
+        # --- 3. significant pairs (volcano) --------------------------------------------------------
+        x = tbl["cohen_d"].to_numpy(float)
+        with np.errstate(divide="ignore"):
+            y = -np.log10(np.clip(tbl["fdr"].to_numpy(float), 1e-300, 1))
+        sig = tbl["significant"].to_numpy(bool)
+        fig, ax = plt.subplots(figsize=(6.2, 4.6))
+        ax.scatter(x[~sig], y[~sig], s=14, color=GREY, label="not significant")
+        ax.scatter(x[sig], y[sig], s=22, color=HIT_RED, label=f"FDR < {alpha_p} ({int(sig.sum())})")
+        ax.axhline(-np.log10(alpha_p), color="#718096", ls="--", lw=1); ax.axvline(0, color="#718096", ls="--", lw=1)
+        lab = tbl[sig].assign(abs_d=lambda d: d["cohen_d"].abs()).sort_values("abs_d", ascending=False).head(12)
+        for _, r in lab.iterrows():
+            ax.annotate(f"{r['target']}:{r['protein']}", (r["cohen_d"], -np.log10(max(r["fdr"], 1e-300))), fontsize=6, xytext=(3, 3), textcoords="offset points")
+        ax.set_xlabel("Cohen's d (perturbed - control)"); ax.set_ylabel("-log10 BH-FDR (Mann-Whitney U)")
+        ax.set_title(f"Target x protein effects: {int(sig.sum())} of {len(tbl)} pairs significant", fontsize=10)
+        ax.legend(fontsize=8, frameon=False)
+        despine(ax)
+        fig.tight_layout()
+        reg.save(fig, "protein_effects_volcano", SECTION, ST_PROT, "Significant target-protein pairs", "Every target x protein test; points to the right raise the protein, to the left lower it. The strongest significant pairs are labelled.")
+        # --- 4-6. strongest effects: distributions, sample and guide consistency --------------------
+        if P is not None:
+            top = tbl[tbl["significant"]] if sig.any() else tbl
+            top = top.assign(abs_d=top["cohen_d"].abs()).sort_values("abs_d", ascending=False).head(6)
+            klass = obs["perturbation_class"].astype(str).to_numpy(); tg = obs["target"].astype(str).to_numpy()
+            cclass = obs["control_class"].astype(str).to_numpy() if "control_class" in obs else np.full(adata.n_obs, "")
+            ctrl = (klass == CLASS_CONTROL) & np.isin(cclass, list(cfg.analysis.perturbation_effects.control_classes)) & P.notna().all(axis=1).to_numpy()
+            n = len(top)
+            fig, axes = plt.subplots(1, n, figsize=(2.7 * n, 3.0), squeeze=False)
+            for ax, (_, r) in zip(axes[0], top.iterrows()):
+                pm = (tg == r["target"]) & (klass == CLASS_TARGETING) & P.notna().all(axis=1).to_numpy()
+                vals = [P.loc[ctrl, r["protein"]].to_numpy(float), P.loc[pm, r["protein"]].to_numpy(float)]
+                parts = ax.violinplot([v if v.size else np.array([0.0]) for v in vals], showmedians=True)
+                for b, c in zip(parts["bodies"], (GREY, HIT_RED if r["significant"] else BLUE)):
+                    b.set_facecolor(c); b.set_alpha(0.7)
+                ax.set_xticks([1, 2]); ax.set_xticklabels([f"control\n(n={int(ctrl.sum())})", f"{r['target']}\n(n={int(pm.sum())})"], fontsize=7)
+                ax.set_ylabel(f"{r['protein']} ({pr.info.get('representation')})", fontsize=8)
+                ax.set_title(f"d={r['cohen_d']:+.2f}, FDR={r['fdr']:.2g}", fontsize=8)
+                despine(ax)
+            fig.suptitle("Protein distributions for the strongest target x protein effects", fontsize=10)
+            fig.tight_layout()
+            reg.save(fig, "protein_effects_distributions", SECTION, ST_PROT, "Protein distributions of the strongest effects", "Normalized protein value in the perturbed cells of the target versus the non-targeting controls for the strongest (significant where any) target x protein pairs; medians marked.")
+            for col, name, title in (("sample", "protein_effects_sample_consistency", "Sample consistency of the strongest protein effects"), ("guide", "protein_effects_guide_consistency", "Guide consistency of the strongest protein effects")):
+                if col not in obs.columns:
+                    continue
+                groups = obs[col].astype(str).to_numpy()
+                fig, axes = plt.subplots(1, n, figsize=(2.7 * n, 3.0), squeeze=False)
+                for ax, (_, r) in zip(axes[0], top.iterrows()):
+                    pm = (tg == r["target"]) & (klass == CLASS_TARGETING) & P.notna().all(axis=1).to_numpy()
+                    if col == "guide":
+                        per = {}
+                        for g in np.unique(groups[pm]):
+                            mg = pm & (groups == g)
+                            if mg.sum() >= 5:
+                                per[str(g)] = (float(P.loc[mg, r["protein"]].mean() - P.loc[ctrl, r["protein"]].mean()), int(mg.sum()), int(ctrl.sum()))
+                    else:
+                        per = _group_means(P[r["protein"]], groups, pm, ctrl)
+                    if not per:
+                        ax.axis("off"); ax.text(0.5, 0.5, "too few cells\nper level", ha="center", va="center", fontsize=8, transform=ax.transAxes); continue
+                    keys = list(per)
+                    vals = [per[k][0] for k in keys]
+                    ax.bar(range(len(keys)), vals, color=[HIT_RED if np.sign(v) == np.sign(r["effect"]) else GREY for v in vals])
+                    ax.axhline(0, color="black", lw=0.8); ax.axhline(r["effect"], color=BLUE, ls="--", lw=1)
+                    ax.set_xticks(range(len(keys))); ax.set_xticklabels([f"{k}\n(n={per[k][1]})" for k in keys], fontsize=6, rotation=90 if col == "guide" else 0)
+                    ax.set_title(f"{r['target']}:{r['protein']}", fontsize=8); ax.set_ylabel("mean diff vs control", fontsize=7)
+                    despine(ax)
+                fig.suptitle(title, fontsize=10)
+                fig.tight_layout()
+                reg.save(fig, name, SECTION, ST_PROT, title, f"Per-{col} difference of the normalized protein mean between the target's cells and the controls (levels with >= 5 cells); the dashed line is the pooled effect, red bars share its sign. Descriptive companion of the n_{col}s_same_sign columns in protein_effects.csv.")
     co = res.concordance
     if co is None:
         return
+    # --- PS <-> protein --------------------------------------------------------------------------
     pp = co.ps_protein
     if pp is not None and not pp.empty and ps is not None:
-        w = pp[(pp["scope"] == "within_target") & (pp["status"] != "insufficient_support")].copy()
+        w_all = pp[pp["scope"] == "within_target"]
+        if not w_all.empty:
+            R = w_all.pivot(index="target", columns="protein", values="spearman_rho")
+            Fq = w_all.pivot(index="target", columns="protein", values="fdr").reindex(index=R.index, columns=R.columns) < alpha_c
+            R = R.loc[R.abs().max(axis=1).sort_values(ascending=False).index]
+            fig, ax = plt.subplots(figsize=(1.8 + 0.7 * R.shape[1], 1.2 + 0.2 * R.shape[0]))
+            _heatmap(ax, R, label="Spearman rho (PS vs protein, within target)", marks=Fq.loc[R.index, R.columns])
+            ax.set_title("PS <-> protein (cell level, within target)", fontsize=9)
+            fig.tight_layout()
+            reg.save(fig, "ps_protein_heatmap", SECTION, ST_CONC, "PS vs protein association heatmap", f"Within each target's perturbed cells, Spearman correlation between the per-cell PS and each protein; * = BH-FDR < {alpha_c} over the within-target tests. Rows ordered by the largest |rho|.")
+        w = w_all[w_all["status"] != "insufficient_support"].copy()
         w["abs"] = w["spearman_rho"].abs()
         w = w.sort_values(["fdr", "abs", "target"], ascending=[True, False, True]).head(6)
-        if not w.empty:
-            P = adata.obsm[cfg.analysis.perturbation_effects.protein.representation]
+        if not w.empty and P is not None:
             n = len(w)
             fig, axes = plt.subplots(1, n, figsize=(2.8 * n, 2.8), squeeze=False)
             for ax, (_, r) in zip(axes[0], w.iterrows()):
@@ -580,11 +682,50 @@ def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
                 ax.set_xlabel("PS", fontsize=8); ax.set_ylabel(f"{r['protein']} (CLR)", fontsize=8)
             fig.tight_layout()
             reg.save(fig, "ps_vs_protein", SECTION, ST_CONC, "PS vs protein (within target)", "Per-cell PS vs protein value inside one target's perturbed cells, for the pairs with the lowest FDR; red = binned-median trend (visual aid). The statistic is the within-target Spearman rho in ps_protein_association.csv.")
-    ppc = co.program_protein_cells
-    if ppc is not None and not ppc.empty and mo is not None and not mo.empty and mo.program_activity is not None:
+    # --- lochNESS <-> protein (target level) -----------------------------------------------------
+    lp, lps = co.lochness_protein, co.lochness_protein_summary
+    if lp is not None and not lp.empty and lps is not None and not lps.empty:
+        prots = list(lps["protein"])
+        n = len(prots)
+        fig, axes = plt.subplots(1, n, figsize=(3.0 * n, 3.0), squeeze=False)
+        for ax, p_ in zip(axes[0], prots):
+            sub = lp[lp["protein"] == p_]
+            row = lps[lps["protein"] == p_].iloc[0]
+            ax.scatter(sub["lochness_own_mean"], sub["protein_effect"], s=18, color=BLUE, alpha=0.8)
+            for _, r in sub.assign(a=sub["protein_effect"].abs()).sort_values("a", ascending=False).head(4).iterrows():
+                ax.annotate(r["target"], (r["lochness_own_mean"], r["protein_effect"]), fontsize=6, xytext=(2, 2), textcoords="offset points")
+            ax.axhline(0, color="#718096", lw=0.8)
+            ax.set_xlabel("mean lochNESS in own cells", fontsize=8); ax.set_ylabel(f"{p_} effect (CLR diff)", fontsize=8)
+            ax.set_title(f"{p_}: rho={row['rho_lochness_vs_effect']:+.2f} (p={row['p_lochness_vs_effect']:.2g}); |effect| rho={row['rho_lochness_vs_abs_effect']:+.2f} (FDR={row['fdr_abs_effect']:.2g})", fontsize=7)
+            despine(ax)
+        fig.suptitle(f"lochNESS <-> protein across {int(lps['n_targets'].iloc[0])} targets (target level)", fontsize=10)
+        fig.tight_layout()
+        reg.save(fig, "lochness_vs_protein", SECTION, ST_CONC, "lochNESS vs protein effect (target level)", "Per protein: each target's own-cell mean lochNESS (does the perturbation occupy a distinct transcriptomic neighbourhood) against its protein effect; Spearman across targets for the signed and the absolute effect (lochness_protein_summary.csv). lochNESS is a population quantity, so no cell-level correlation is computed.")
+    # --- program <-> protein: cell level and target level, kept apart -----------------------------
+    ppc, ppt = co.program_protein_cells, co.program_protein_targets
+    panels = []
+    if ppc is not None and not ppc.empty:
+        panels.append(("cell level: program activity vs protein\n(single-guide + control cells)", ppc.pivot(index="gene_program", columns="protein", values="spearman_rho"), ppc.pivot(index="gene_program", columns="protein", values="fdr") < alpha_c))
+    if ppt is not None and not ppt.empty and ppt["spearman_rho"].notna().any():
+        panels.append((f"target level: program effect vs protein effect\n(across {int(ppt['n_targets'].max())} targets)", ppt.pivot(index="gene_program", columns="protein", values="spearman_rho"), ppt.pivot(index="gene_program", columns="protein", values="fdr") < alpha_c))
+    if panels:
+        fig, axes = plt.subplots(1, len(panels), figsize=(4.4 * len(panels), 1.6 + 0.5 * panels[0][1].shape[0]), squeeze=False)
+        for ax, (title, R, Fq) in zip(axes[0], panels):
+            im = ax.imshow(R.to_numpy(float), cmap="RdBu_r", vmin=-1, vmax=1, aspect="auto")
+            ax.set_xticks(range(R.shape[1])); ax.set_xticklabels(R.columns, rotation=90, fontsize=8)
+            ax.set_yticks(range(R.shape[0])); ax.set_yticklabels(R.index, fontsize=8)
+            for i in range(R.shape[0]):
+                for j in range(R.shape[1]):
+                    v = R.iat[i, j]
+                    if np.isfinite(v):
+                        ax.text(j, i, f"{v:+.2f}{'*' if bool(Fq.reindex(index=R.index, columns=R.columns).iat[i, j]) else ''}", ha="center", va="center", fontsize=7, color="white" if abs(v) > 0.6 else "black")
+            ax.set_title(title, fontsize=9)
+            fig.colorbar(im, ax=ax, fraction=0.046, label="Spearman rho")
+        fig.tight_layout()
+        reg.save(fig, "program_protein_heatmap", SECTION, ST_CONC, "Gene program x protein associations", f"Left: Spearman correlation of per-cell program activity with each protein over single-guide and control cells. Right: Spearman correlation across targets between the perturbation x program effect and the perturbation x protein effect. The two levels are separate statistics and are never combined; * = BH-FDR < {alpha_c} within each level.")
+    if ppc is not None and not ppc.empty and mo is not None and not mo.empty and mo.program_activity is not None and P is not None:
         w = ppc.copy(); w["abs"] = w["spearman_rho"].abs()
         w = w.sort_values(["fdr", "abs"], ascending=[True, False]).head(4)
-        P = adata.obsm[cfg.analysis.perturbation_effects.protein.representation]
         cells = adata.obs["perturbation_class"].astype(str).isin([CLASS_TARGETING, CLASS_CONTROL]).to_numpy() & P.notna().all(axis=1).to_numpy()
         n = len(w)
         fig, axes = plt.subplots(1, n, figsize=(2.8 * n, 2.8), squeeze=False)
@@ -595,27 +736,34 @@ def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
             ax.set_xlabel(f"{r['gene_program']} activity", fontsize=8); ax.set_ylabel(f"{r['protein']} (CLR)", fontsize=8)
         fig.tight_layout()
         reg.save(fig, "program_activity_vs_protein", SECTION, ST_CONC, "Gene-program activity vs protein", "Cell-level program activity vs protein value over single-guide and control cells, strongest pairs by FDR; association only, not mediation.")
+    # --- integrated target overview --------------------------------------------------------------
     sm = co.summary
     if sm is not None and not sm.empty and "protein_effect_magnitude" in sm.columns:
-        fig, axes = plt.subplots(1, 2, figsize=(8, 3.4))
-        for ax, (col, lab) in zip(axes, (("rna_effect_magnitude", "RNA effect (mean |log2FC| of panel genes)"), ("lochness_own_mean", "lochNESS in own cells"))):
+        fig, axes = plt.subplots(1, 3, figsize=(11.5, 3.4))
+        specs = (("direct_rna_log2fc", "direct knockdown log2FC (target's own gene)"), ("rna_effect_magnitude", "RNA effect (mean |log2FC| of panel genes)"), ("lochness_own_mean", "lochNESS in own cells"))
+        for ax, (col, lab) in zip(axes, specs):
             if col not in sm.columns:
                 ax.axis("off"); continue
             ok = sm[col].notna() & sm["protein_effect_magnitude"].notna()
-            ax.scatter(sm.loc[ok, col], sm.loc[ok, "protein_effect_magnitude"], s=np.clip(sm.loc[ok, "n_cells"], 10, 200), color=BLUE, alpha=0.7)
+            colors = [HIT_RED if bool(h) else BLUE for h in sm.loc[ok, "effective_knockdown"].eq(True)] if "effective_knockdown" in sm.columns else BLUE
+            ax.scatter(sm.loc[ok, col], sm.loc[ok, "protein_effect_magnitude"], s=np.clip(sm.loc[ok, "n_cells"], 10, 200), c=colors, alpha=0.7)
             for _, r in sm[ok].iterrows():
                 ax.annotate(r["target"], (r[col], r["protein_effect_magnitude"]), fontsize=6)
             ax.set_xlabel(lab, fontsize=8); ax.set_ylabel("max |Cohen's d| over proteins", fontsize=8)
+            despine(ax)
         fig.tight_layout()
-        reg.save(fig, "rna_vs_protein_effects", SECTION, ST_CONC, "RNA vs protein effect magnitude", "Target-level comparison: transcriptional effect size (left) and lochNESS state shift (right) vs the largest protein effect; point size = cells. Across-target association statistics are in lochness_protein_summary.csv.")
-        cols = [c for c in ("ps_auc_vs_control", "lochness_own_mean", "rna_effect_magnitude", "protein_effect_magnitude") if c in sm.columns]
+        reg.save(fig, "rna_vs_protein_effects", SECTION, ST_CONC, "RNA vs protein effect magnitude", "Target-level comparison of the largest protein effect with the direct knockdown of the target's own gene (left; red = effective knockdown), the transcriptome-wide effect size (middle) and the lochNESS state shift (right); point size = cells. Descriptive: no cross-modal statistic is computed here.")
+        cols = [c for c in ("direct_rna_log2fc", "ps_auc_vs_control", "lochness_own_mean", "cluster_composition_shift_pct", "rna_effect_magnitude", "protein_effect_magnitude") if c in sm.columns]
         O = sm.set_index("target")[cols].astype(float)
+        if "direct_rna_log2fc" in O.columns:
+            O["direct_rna_log2fc"] = -O["direct_rna_log2fc"]  # knockdown strength: positive = stronger reduction
+            O = O.rename(columns={"direct_rna_log2fc": "direct knockdown (-log2FC)"})
         O = O.loc[O.abs().sum(axis=1).sort_values(ascending=False).index]
         Z = (O - O.mean()) / O.std(ddof=0).replace(0, 1)
         fig, ax = plt.subplots(figsize=(1.5 + 0.8 * Z.shape[1], 1.2 + 0.2 * Z.shape[0]))
         _heatmap(ax, Z, label="z-score across targets")
         fig.tight_layout()
-        reg.save(fig, "perturbation_overview", SECTION, ST_CONC, "Integrated perturbation overview", "Per target: PS separation from controls (AUC), lochNESS self-enrichment, RNA effect magnitude and protein effect magnitude, each z-scored across targets (values in perturbation_summary.csv).")
+        reg.save(fig, "perturbation_overview", SECTION, ST_CONC, "Integrated perturbation overview", "Per target, each z-scored across targets: direct knockdown of the target's own gene (sign flipped so stronger knockdown is positive), PS separation from controls (AUC), lochNESS self-enrichment, cluster composition shift, RNA effect magnitude and protein effect magnitude (values in perturbation_summary.csv).")
 
 
 def perturbation_effect_figures(res, adata, cfg, reg: FigureRegistry) -> None:

@@ -155,18 +155,23 @@ def _violin_by_group(obs: pd.DataFrame, col: str, group: str, label: str, log: b
 def protein_qc_figures(obs: pd.DataFrame, counts: Optional[pd.DataFrame], prot: Optional[pd.DataFrame], table: Optional[pd.DataFrame], cfg: Config, reg: FigureRegistry, stage: str, primary_desc: str = "") -> None:
     sl = _stage_label(stage)
     fp = cfg.qc.filter.protein
+    has_iso = bool(table is not None and "is_isotype" in table and table["is_isotype"].astype(bool).any())
     if counts is not None and "protein_total_counts" in obs.columns:
         fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.2))
         _hist(axes[0], obs["protein_total_counts"].to_numpy(float), "total ADT counts", True, [(fp.min_total_counts, f"min_total_counts={fp.min_total_counts}")], ORANGE)
         _hist(axes[1], obs["protein_n_detected"].to_numpy(float), "antibodies detected", False, [(fp.min_proteins_detected, f"min_proteins_detected={fp.min_proteins_detected}")], ORANGE)
-        _hist(axes[2], obs["protein_pct_isotype"].to_numpy(float), "% isotype counts", False, [(fp.max_pct_isotype, f"max_pct_isotype={fp.max_pct_isotype}")], ORANGE)
+        if has_iso:
+            _hist(axes[2], obs["protein_pct_isotype"].to_numpy(float), "% isotype counts", False, [(fp.max_pct_isotype, f"max_pct_isotype={fp.max_pct_isotype}")], ORANGE)
+        else:
+            axes[2].axis("off")
+            axes[2].text(0.5, 0.5, "no isotype control\nantibodies in this panel:\n% isotype not applicable", ha="center", va="center", fontsize=9, color=GREY, transform=axes[2].transAxes)
         fig.suptitle(f"Protein QC distributions ({sl}, n = {int(obs['protein_total_counts'].notna().sum()):,} cells with ADT counts)", fontsize=11)
         fig.tight_layout()
         reg.save(fig, f"protein_qc_distributions_{stage}", SECTION_QC_PROTEIN, stage, f"Protein QC distributions ({sl})",
-                 "Total ADT UMIs per cell, antibodies with >= 1 count, and the share of ADT counts on isotype controls; dashed lines are the configured qc.filter.protein thresholds.")
-        # targeting vs isotype
+                 "Total ADT UMIs per cell, antibodies with >= 1 count" + (", and the share of ADT counts on isotype controls" if has_iso else " (no isotype controls in this panel, so no isotype share)") + "; dashed lines are the configured qc.filter.protein thresholds.")
+        # targeting vs isotype (only when isotype controls exist)
         t = obs.get("protein_total_counts_targeting"); i = obs.get("protein_isotype_counts")
-        if t is not None and i is not None:
+        if has_iso and t is not None and i is not None:
             ok = np.isfinite(t.to_numpy(float)) & np.isfinite(i.to_numpy(float))
             idx = np.where(ok)[0][_sample_idx(int(ok.sum()))]
             ext = obs["protein_extreme_counts"].to_numpy(bool)[idx] if "protein_extreme_counts" in obs else np.zeros(len(idx), bool)
@@ -202,13 +207,16 @@ def protein_qc_figures(obs: pd.DataFrame, counts: Optional[pd.DataFrame], prot: 
         fig = _antibody_grid(counts, table, log1p=True, title=f"Raw ADT counts per antibody ({sl})")
         reg.save(fig, f"protein_antibody_distributions_{stage}", SECTION_QC_PROTEIN, stage, f"Per-antibody raw count distributions ({sl})",
                  "log1p raw counts per antibody; isotype controls in red, background-dominated antibodies marked (*).")
-        fig = _antibody_summary(table, title=f"Antibody summary ({sl})")
+        fig = _antibody_summary(table, title=f"Antibody summary ({sl})", has_iso=has_iso)
         reg.save(fig, f"protein_antibody_summary_{stage}", SECTION_QC_PROTEIN, stage, f"Antibody summary ({sl})",
-                 "Median raw counts per antibody (isotype controls red, hatched = background-dominated) and the fraction of cells above the matched isotype control.")
+                 "Median raw counts per antibody" + (" (isotype controls red, hatched = background-dominated) and the fraction of cells above the matched isotype control." if has_iso else "; no isotype controls exist in this panel, so the background-dominance criterion is not applicable."))
     if prot is not None:
         fig = _antibody_grid(prot, table, log1p=False, title=f"Normalized protein values ({sl}){' - ' + primary_desc if primary_desc else ''}", color=BLUE)
         reg.save(fig, f"protein_normalized_distributions_{stage}", SECTION_QC_PROTEIN, stage, f"Normalized protein value distributions ({sl})",
                  f"Distribution of obsm['protein'] per antibody ({primary_desc or 'primary normalized representation'}).")
+        fig = _protein_correlation(prot, counts, title=f"Protein-protein correlation ({sl})")
+        reg.save(fig, f"protein_correlation_{stage}", SECTION_QC_PROTEIN, stage, f"Protein-protein correlation ({sl})",
+                 "Spearman correlation between antibodies across cells: left on the normalized values (obsm['protein']), right on the raw ADT counts when available. Uniform positive correlation between antibodies reflects the shared per-cell ADT depth; with the default per-protein CLR (protein.clr_axis: cells, a per-antibody shift) the ranks are unchanged and both panels agree, so this depth component is carried into the normalized values and into the protein PCA (see the protein PC-vs-depth figure).")
 
 
 def _antibody_grid(mat: pd.DataFrame, table: Optional[pd.DataFrame], log1p: bool, title: str, color: str = ORANGE):
@@ -232,22 +240,46 @@ def _antibody_grid(mat: pd.DataFrame, table: Optional[pd.DataFrame], log1p: bool
     return fig
 
 
-def _antibody_summary(table: Optional[pd.DataFrame], title: str):
+def _antibody_summary(table: Optional[pd.DataFrame], title: str, has_iso: bool = True):
     if table is None or "counts_median" not in table.columns:
         return None
     t = table.sort_values("counts_median", ascending=False)
     iso = t["is_isotype"].astype(bool).to_numpy() if "is_isotype" in t else np.zeros(len(t), bool)
     bg = t["background_dominated"].fillna(False).astype(bool).to_numpy() if "background_dominated" in t else np.zeros(len(t), bool)
-    fig, axes = plt.subplots(2, 1, figsize=(max(5, 0.35 * len(t)), 5.4), sharex=True)
+    nrow = 2 if (has_iso and "frac_cells_above_isotype" in t) else 1
+    fig, axes = plt.subplots(nrow, 1, figsize=(max(5, 0.35 * len(t)), 2.9 * nrow + 0.4), sharex=True, squeeze=False)
+    axes = axes.ravel()
     axes[0].bar(range(len(t)), t["counts_median"], color=[RED if i else BLUE for i in iso], hatch=["//" if b else "" for b in bg])
     axes[0].set_ylabel("median raw counts")
     axes[0].set_yscale("symlog")
-    if "frac_cells_above_isotype" in t:
+    if nrow == 2:
         axes[1].bar(range(len(t)), t["frac_cells_above_isotype"].fillna(0), color=[RED if i else GREY for i in iso])
         axes[1].axhline(0.5, color=RED, ls="--", lw=1)
         axes[1].set_ylabel("frac. cells > isotype")
-    axes[1].set_xticks(range(len(t)))
-    axes[1].set_xticklabels(t.index, rotation=90, fontsize=7)
+    axes[-1].set_xticks(range(len(t)))
+    axes[-1].set_xticklabels(t.index, rotation=90, fontsize=7)
+    fig.suptitle(title, fontsize=11)
+    fig.tight_layout()
+    return fig
+
+
+def _protein_correlation(prot: pd.DataFrame, counts: Optional[pd.DataFrame], title: str):
+    """Spearman correlation between antibodies across cells, normalized values (and raw counts when available)."""
+    mats = [("normalized (obsm['protein'])", prot)]
+    if counts is not None:
+        mats.append(("raw ADT counts", counts[[c for c in prot.columns if c in counts.columns]] if all(c in counts.columns for c in prot.columns) else counts))
+    fig, axes = plt.subplots(1, len(mats), figsize=(4.6 * len(mats), 4.2), squeeze=False)
+    for ax, (lab, M) in zip(axes[0], mats):
+        C = M.dropna().corr(method="spearman")
+        im = ax.imshow(C.to_numpy(float), cmap="RdBu_r", vmin=-1, vmax=1)
+        ax.set_xticks(range(C.shape[1])); ax.set_xticklabels(C.columns, rotation=90, fontsize=7)
+        ax.set_yticks(range(C.shape[0])); ax.set_yticklabels(C.index, fontsize=7)
+        if C.shape[0] <= 12:
+            for i in range(C.shape[0]):
+                for j in range(C.shape[1]):
+                    ax.text(j, i, f"{C.iat[i, j]:.2f}", ha="center", va="center", fontsize=7, color="white" if abs(C.iat[i, j]) > 0.6 else "black")
+        ax.set_title(lab, fontsize=9)
+        fig.colorbar(im, ax=ax, fraction=0.046, label="Spearman rho")
     fig.suptitle(title, fontsize=11)
     fig.tight_layout()
     return fig

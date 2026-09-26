@@ -440,6 +440,9 @@ def run_pipeline(cfg: Config) -> PipelineResult:
         with st.stage("perturbation effects (modules, PS, lochNESS, protein, concordance)"):
             from .reporting.perturbation_plots import perturbation_effect_figures
             pe_res = pe_analysis.run_perturbation_effects(adata, cfg, strength)
+            integrated = pe_analysis.integrate_target_summary(pe_res, cs_res)
+            if integrated is not None:
+                pe_res.concordance.summary = integrated
             pe_analysis.attach(adata, pe_res)
             perturbation_effect_figures(pe_res, adata, cfg, registry)
             for name, r in (("PS", pe_res.ps), ("lochNESS", pe_res.lochness), ("protein effects", pe_res.protein)):

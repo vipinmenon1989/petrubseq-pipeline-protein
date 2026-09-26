@@ -79,6 +79,54 @@ def run_perturbation_effects(adata: ad.AnnData, cfg: Config, strength: Optional[
     return res
 
 
+def integrate_target_summary(res: PerturbationEffects, cell_states=None) -> Optional[pd.DataFrame]:
+    """One row per perturbation target joining the existing results (no new statistics).
+
+    Adds to the concordance summary: the direct knockdown of the target's own gene
+    (perturbation strength, primary arm), the strongest cluster association
+    (enrichment, primary arm, smallest FDR), the composition shift, the strongest
+    gene program, and the protein most associated with that program at the target
+    level (a lookup in program_protein_association_targets). Unavailable values stay NaN.
+    """
+    if res.concordance is None or res.concordance.summary.empty:
+        return None
+    sm = res.concordance.summary.copy()
+    st = res.strength
+    if st is not None and not st.empty and not st.table.empty:
+        a = st.primary_control
+        cols = {"target": "target", f"log2fc_{a}": "direct_rna_log2fc", f"pct_knockdown_{a}": "direct_rna_pct_knockdown", f"ks_fdr_{a}": "direct_rna_ks_fdr", f"is_hit_{a}": "effective_knockdown", "rank": "direct_rna_rank"}
+        t = st.table[[c for c in cols if c in st.table.columns]].rename(columns=cols)
+        sm = sm.merge(t, on="target", how="left")
+        sm["direct_rna_control"] = a
+    e = getattr(cell_states, "enrichment", None) if cell_states is not None else None
+    if e is not None and not e.empty and not e.table.empty:
+        prim = e.table[e.table["control"] == e.primary_control].sort_values(["fdr", "pval"])
+        best = prim.groupby("target").head(1)[["target", "cluster", "direction", "log2_odds_ratio", "fdr", "significant"]].rename(
+            columns={"cluster": "strongest_cluster", "direction": "strongest_cluster_direction", "log2_odds_ratio": "cluster_enrichment_log2_or", "fdr": "cluster_enrichment_fdr", "significant": "cluster_enrichment_significant"})
+        sm = sm.merge(best, on="target", how="left")
+        mag = e.effect_magnitude[["target", "composition_shift_pct", "n_significant_clusters"]].rename(columns={"composition_shift_pct": "cluster_composition_shift_pct", "n_significant_clusters": "n_significant_clusters"})
+        sm = sm.merge(mag, on="target", how="left")
+        sm["cluster_enrichment_control"] = e.primary_control
+    mo = res.modules
+    if mo is not None and not mo.empty:
+        ppe = mo.perturbation_program_effects.copy()
+        ppe["abs"] = ppe["mean_log2fc"].abs()
+        top = ppe.sort_values("abs", ascending=False).groupby("target").head(1)[["target", "program", "mean_log2fc", "frac_de"]].rename(columns={"program": "strongest_gene_program", "mean_log2fc": "gene_program_effect", "frac_de": "gene_program_frac_de"})
+        sm = sm.merge(top, on="target", how="left")
+        ppt = res.concordance.program_protein_targets
+        if ppt is not None and not ppt.empty and ppt["spearman_rho"].notna().any():
+            ppt = ppt.assign(abs=ppt["spearman_rho"].abs()).sort_values("abs", ascending=False)
+            best_by_prog = ppt.groupby("gene_program").head(1).set_index("gene_program")
+            sm["strongest_program_protein_association"] = [
+                (f"{best_by_prog.loc[pgm, 'protein']} rho={best_by_prog.loc[pgm, 'spearman_rho']:+.2f} fdr={best_by_prog.loc[pgm, 'fdr']:.2g}" if isinstance(pgm, str) and pgm in best_by_prog.index else "")
+                for pgm in sm.get("strongest_gene_program", pd.Series([np.nan] * len(sm)))]
+    front = [c for c in ("target", "n_cells", "direct_rna_log2fc", "direct_rna_pct_knockdown", "direct_rna_ks_fdr", "effective_knockdown", "direct_rna_rank", "ps_median", "ps_auc_vs_control", "ps_net_pct_kd", "lochness_own_mean", "lochness_fdr",
+                         "strongest_cluster", "strongest_cluster_direction", "cluster_enrichment_log2_or", "cluster_enrichment_fdr", "cluster_composition_shift_pct", "n_significant_clusters", "module", "n_de_genes", "rna_effect_magnitude",
+                         "strongest_gene_program", "gene_program_effect", "strongest_programs", "strongest_protein", "protein_effect_magnitude", "n_proteins_significant", "ps_protein_best", "strongest_program_protein_association") if c in sm.columns]
+    sm = sm[front + [c for c in sm.columns if c not in front]]
+    return sm
+
+
 def _h5(df: pd.DataFrame) -> pd.DataFrame:
     """h5ad-safe copy: object columns as strings (NaN -> '')."""
     df = df.copy()

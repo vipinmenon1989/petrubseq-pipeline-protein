@@ -139,7 +139,7 @@ def section_views(ctx: ReportContext, max_rows: int) -> Dict[str, Any]:
                    "protein": _t(pe.protein.table if pe.protein else None, ["target", "protein", "n_perturbed", "n_control", "mean_perturbed", "mean_control", "effect", "cohen_d", "p_value", "fdr", "n_samples_tested", "n_samples_same_sign", "n_guides_tested", "n_guides_same_sign", "status"], 60),
                    "ps_protein": _t(pe.concordance.ps_protein if pe.concordance else None, ["scope", "target", "protein", "n_cells", "spearman_rho", "p_value", "fdr", "status"], 40),
                    "lochness_protein": _t(pe.concordance.lochness_protein_summary if pe.concordance else None), "program_protein": _t(pe.concordance.program_protein_cells if pe.concordance else None, None, 40),
-                   "program_protein_targets": _t(pe.concordance.program_protein_targets if pe.concordance else None, None, 40), "summary": _t(pe.concordance.summary if pe.concordance else None, None, 60)}
+                   "program_protein_targets": _t(pe.concordance.program_protein_targets if pe.concordance else None, None, 40), "summary": _t(pe.concordance.summary if pe.concordance else None, ["target", "n_cells", "direct_rna_log2fc", "direct_rna_ks_fdr", "effective_knockdown", "ps_median", "ps_auc_vs_control", "lochness_own_mean", "strongest_cluster", "strongest_cluster_direction", "cluster_enrichment_log2_or", "cluster_enrichment_fdr", "cluster_composition_shift_pct", "module", "n_de_genes", "rna_effect_magnitude", "strongest_gene_program", "gene_program_effect", "strongest_protein", "protein_effect_magnitude", "n_proteins_significant", "ps_protein_best", "strongest_program_protein_association"], 60)}
     # --- numbering ---------------------------------------------------------------------------
     nav: List[tuple] = [("inputs", "Inputs"), ("qc", "Quality control"), ("clustering", "Clustering" if cs_view else "Embedding")]
     if strength_view: nav.append(("strength", "Perturbation strength"))
@@ -176,7 +176,8 @@ def write_html(ctx: ReportContext, path: Path, embed: bool = True, max_rows: int
         "versions": kv_table(ctx.versions), "provenance": kv_table({k: v for k, v in ctx.provenance.items() if k not in ("packages", "inputs", "config")}),
     }
     views = section_views(ctx, max_rows)
-    html = tpl.render(ctx=ctx, tables=tables, render=lambda f: render_figure(f, embed, ctx.run_dir), group_summaries=[(k, df_to_html(v)) for k, v in ctx.group_summaries.items()], n_tables=len(ctx.tables), n_figures=len(reg.records), **views)
+    n_iso = ctx.protein_info.get("n_isotype_features") if isinstance(ctx.protein_info, dict) else None
+    html = tpl.render(ctx=ctx, tables=tables, render=lambda f: render_figure(f, embed, ctx.run_dir), group_summaries=[(k, df_to_html(v)) for k, v in ctx.group_summaries.items()], n_tables=len(ctx.tables), n_figures=len(reg.records), protein_has_isotypes=(n_iso is None or int(n_iso) > 0), **views)
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")

@@ -141,6 +141,7 @@
 {% endif %}
 
 <h2 id="protein-qc">{{ secn.protein_qc }}. Protein QC</h2>
+{% if not protein_has_isotypes %}<div class="note">This antibody panel contains no isotype control antibodies. Isotype-based QC (isotype share per cell, background-dominated antibodies, targeting-vs-isotype counts) is therefore not applicable and is not shown; this is a property of the panel, not a failure.</div>{% endif %}
 <h3>{{ secn.protein_qc }}.1 Protein representations and features</h3>{{ tables.protein_info }}<div class="scroll">{{ tables.protein_features }}</div>
 <h3>{{ secn.protein_qc }}.2 Protein QC summary</h3>{{ tables.protein_qc }}
 <h3>{{ secn.protein_qc }}.3 Protein QC before filtering</h3>{% for f in figs.qc_protein_before %}{{ render(f) }}{% endfor %}
@@ -159,7 +160,7 @@
 <h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
 <h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
 {% for name, df in group_summaries %}<h4>{{ name }} summary</h4><div class="scroll">{{ df }}</div>{% endfor %}
-<h3>{{ secn.multimodal }}.2 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
+<h3>{{ secn.multimodal }}.2 Integrated perturbation summary</h3><p class="sub">One row per target joining the existing results: direct knockdown of the target's own gene (perturbation strength), PS, lochNESS, strongest cluster association and composition shift (enrichment), module, strongest gene program, strongest protein effect, and the strongest PS-protein and program-protein associations. Full table: tables/perturbation_effects/perturbation_summary.csv.</p><div class="scroll">{{ pe.summary }}</div>
 {% else %}
 <h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
 <h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
