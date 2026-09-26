@@ -228,17 +228,6 @@ notebooks/               demo_papalexi_eccite.ipynb
 
 ---
 
-## Citation
-
-* Song B. et al. Decoding heterogeneous single-cell perturbation responses. *Nat Cell Biol* 27, 493–504 (2025) — PS.
-* Huang X. et al. Single-cell, whole-embryo phenotyping of mammalian developmental disorders. *Nature* 623, 772–781 (2023) — lochNESS.
-* Zhou P. et al. Single-cell CRISPR screens in vivo map T cell fate regulomes in cancer. *Nature* 624, 154–163 (2023) — gene programs / perturbation modules.
-* Traag V.A., Waltman L., van Eck N.J. From Louvain to Leiden. *Sci Rep* 9, 5233 (2019) — clustering.
-* Papalexi E. et al. Characterizing the molecular regulation of inhibitory immune checkpoints with multimodal single-cell screens. *Nat Genet* 53, 322–331 (2021) — demo data, GEO GSE153056.
-* Frangieh C.J. et al. Multimodal pooled Perturb-CITE-seq screens in patient models define mechanisms of cancer immune evasion. *Nat Genet* 53, 332–341 (2021) — SCP1064 regression data.
-
-Engineering conventions follow [weili-lab/perturbseq-pipeline](https://github.com/weili-lab/perturbseq-pipeline).
-
 ## License
 
 MIT (`LICENSE`). The bundled demo data derive from GEO GSE153056; cite the original publication when using them.
