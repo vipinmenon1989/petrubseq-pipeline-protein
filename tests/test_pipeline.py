@@ -44,12 +44,14 @@ def result(synthetic, tmp_path_factory):
 def test_default_config_values():
     cfg = Config.from_dict({"inputs": {"rna": {"file": "x.csv"}}})
     assert cfg.rna.hvg.n_top_genes == 3000 and cfg.rna.hvg.flavor == "seurat" and cfg.rna.n_pcs == 50 and cfg.rna.scale
-    assert cfg.rna.normalize == "auto" and cfg.rna.target_sum == 1e4 and cfg.rna.reconstruct_counts == "auto"
+    assert cfg.rna.normalize == "auto" and cfg.rna.target_sum is None and cfg.rna.reconstruct_counts == "auto"  # reference: median library size
     assert cfg.protein.normalization == "auto" and cfg.protein.embedding_representation == "auto" and cfg.protein.n_pcs == 10
     assert cfg.protein.exclude_isotypes_from_embedding and cfg.protein.use_isotypes_for_qc and cfg.protein.clr_axis == "cells"
     assert cfg.neighbors.n_neighbors == 15 and cfg.umap.min_dist == 0.5 and cfg.compute.seed == 0
     assert cfg.qc.prefilter.enabled and cfg.qc.prefilter.min_genes_per_cell == 200 and cfg.qc.prefilter.min_cells_per_gene == 3
-    assert cfg.qc.filter.enabled and cfg.qc.filter.rna.min_genes == 500 and cfg.qc.filter.rna.max_pct_mt == 20.0 and cfg.qc.filter.rna.min_counts is None
+    assert cfg.qc.filter.enabled and cfg.qc.filter.rna.min_genes == 1000 and cfg.qc.filter.rna.max_pct_mt == 20.0 and cfg.qc.filter.rna.min_counts is None  # reference qc defaults
+    assert cfg.qc.filter.rna.min_cells_per_gene == 3 and cfg.qc.filter.rna.max_pct_hb is None and cfg.rna.hb_pattern == "^HB[^(P)]"
+    assert cfg.analysis.perturbation_effects.enabled and cfg.analysis.perturbation_effects.strength.enabled and cfg.analysis.clustering.enabled
     assert cfg.qc.filter.protein.min_total_counts is None and not cfg.qc.filter.protein.remove_extreme_counts and cfg.qc.filter.perturbation.cells == "all"
     assert cfg.qc.flags.rna_n_mads == 5.0 and cfg.qc.flags.extreme_fold == 10.0
     assert cfg.report.embed_figures and cfg.report.write_markdown and cfg.report.figure_dpi == 120 and cfg.report.max_table_rows == 100
@@ -277,7 +279,9 @@ def test_raw_counts_are_normalized_and_kept(tmp_path):
     np.testing.assert_array_equal(a.layers["counts"].toarray(), d["counts"])
     assert a.uns["petrubseq_protein"]["rna"]["method"] == "normalize_total+log1p"
     rs = np.expm1(a.X.toarray()).sum(axis=1)
-    assert np.allclose(rs[rs > 0], 1e4, rtol=1e-3)
+    # reference default: normalize_total(target_sum=None) scales every cell to the median library size
+    lib = np.asarray(a.layers["counts"].sum(axis=1)).ravel()
+    assert np.allclose(rs[rs > 0], np.median(lib), rtol=1e-3) and not np.allclose(np.median(lib), 1e4)
 
 
 # ----------------------------------------------------------------- protein ---

@@ -1,37 +1,36 @@
 """lochNESS: local neighbourhood enrichment of each perturbation.
 
-Definition (Huang et al. 2023, Nature 623:772, "local cellular heuristic
-neighbourhood enrichment specificity score"; implementation as ported from
-pertTF by weili-lab/perturbseq-pipeline): for every cell and every target *g*,
+Definition (Huang et al. 2023, Nature 623:772; implementation ported from pertTF
+by the reference weili-lab/perturbseq-pipeline ``lochness.py``): for every cell and
+every target *g*,
 
     lochNESS(cell, g) = local_fraction(g) / overall_fraction(g) - 1
 
-with ``local_fraction`` the share of the cell's k nearest neighbours (in PCA
-space, never UMAP) that are perturbed cells of *g*, and ``overall_fraction``
-*g*'s share of all cells in the object. 0 = chance, > 0 locally enriched,
-< 0 depleted. The value in a target's own cells ("self" score) says whether
-the perturbation occupies a distinct region of cell-state space.
+with ``local_fraction`` the share of the cell's k nearest neighbours (in
+``obsm[use_rep]``, ``X_pca_harmony`` when present else ``X_pca``, first ``n_pcs``
+components; never UMAP) that are perturbed cells of *g*, and ``overall_fraction``
+*g*'s share of **all** cells in the object. 0 = chance, > 0 locally enriched,
+< 0 depleted. The neighbour graph is a dedicated ``sc.pp.neighbors`` graph with
+``k = min(n_neighbors, n - 1)`` (reference: 300); the denominator is the actual
+number of stored neighbours (k - 1, self excluded), as in the reference.
 
-Additions over the reference (recorded in the provenance): k is capped at
-``max_k_fraction`` x n cells for small objects; a seeded label-permutation
-null gives a z-score and empirical p-value for each target's own-cell mean
-(Huang et al. compare against permuted labels); per-sample own-cell means
-expose enrichment driven by one sample; scores live in ``obsm['lochness']``.
+Per target: own-cell mean / median, mean over all cells, maximum, % of all cells
+above ``enrichment_cut``, and the mean per cell-state cluster (``by_cluster``,
+``top_cluster``) when ``obs[analysis.clustering.key]`` exists. Summary sorted by
+``mean_lochness_in_own_cells``. ``self_score``: each cell's score for its own
+label, including the control label.
 
-Control reference: because ``overall_fraction`` is taken over all cells, a
-perturbation without effect is still enriched (> 0) wherever the unperturbed
-cells live when other perturbations occupy separate regions, and the label
-permutation (over all cells) flags it too. ``mean_lochness_in_control_cells``
-(the target's score averaged over control cells) and ``delta_own_vs_control``
-(own-cell mean minus that) separate "the target's cells sit where controls sit"
-(delta ~ 0) from "the target's cells occupy their own state" (delta > 0).
+Extensions (all off or purely additional by default): ``max_k_fraction`` < 1 caps k
+on small objects; ``n_permutations`` > 0 adds a seeded label-permutation null
+(z-score, empirical p, BH-FDR); ``mean_lochness_in_control_cells`` /
+``delta_own_vs_control`` and per-sample own-cell means are extra columns.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from typing import Any, Dict, Optional
 
 import anndata as ad
 import numpy as np
@@ -52,7 +51,15 @@ class LochnessResults:
     summary: pd.DataFrame
     skipped: pd.DataFrame
     by_sample: pd.DataFrame        # targets x samples: own-cell mean per sample (empty if no sample column)
+    by_cluster: pd.DataFrame = field(default_factory=pd.DataFrame)   # targets x clusters: mean score
     info: Dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def n_neighbors(self) -> int:
+        return int(self.info.get("k_used", 0))
+
+    def top_targets(self, n: int):
+        return list(self.summary.head(n)["target"]) if not self.summary.empty else []
 
 
 def neighbor_adjacency(adata: ad.AnnData, use_rep: str, k: int, n_pcs: int, seed: int) -> sp.csr_matrix:
@@ -78,11 +85,13 @@ def compute_lochness(adata: ad.AnnData, cfg: Config) -> LochnessResults:
     lc = pe.lochness
     groups = cell_groups(adata, pe.control_classes, lc.min_cells_per_target, 1)
     n = adata.n_obs
-    use_rep = lc.use_rep or "X_pca"
+    use_rep = lc.use_rep or ("X_pca_harmony" if "X_pca_harmony" in adata.obsm else "X_pca")
     if use_rep not in adata.obsm:
         raise ValueError(f"lochNESS needs obsm[{use_rep!r}] (available: {sorted(adata.obsm)})")
-    k_cap = max(15, int(np.floor(lc.max_k_fraction * n)))
+    k_cap = n - 1 if lc.max_k_fraction >= 1.0 else max(15, int(np.floor(lc.max_k_fraction * n)))
     k = int(min(lc.n_neighbors, k_cap, max(n - 1, 2)))
+    if k < lc.n_neighbors:
+        logger.warning("lochNESS: only %d cells (max_k_fraction %g); using n_neighbors=%d instead of %d", n, lc.max_k_fraction, k, lc.n_neighbors)
     adj = neighbor_adjacency(adata, use_rep, k, lc.n_pcs, cfg.compute.seed)
     counts = np.asarray(adj.sum(axis=1)).ravel().astype(float)
     counts[counts == 0] = np.nan
@@ -90,21 +99,29 @@ def compute_lochness(adata: ad.AnnData, cfg: Config) -> LochnessResults:
     scores = pd.DataFrame(index=adata.obs_names, dtype=float)
     self_score = pd.Series(np.nan, index=adata.obs_names, dtype=float)
     sample = adata.obs["sample"].astype(str).to_numpy() if "sample" in adata.obs.columns else None
-    rows, by_sample = [], {}
+    ckey = cfg.analysis.clustering.key
+    clusters = adata.obs[ckey].astype(str).to_numpy() if ckey in adata.obs.columns else None
+    rows, by_sample, by_cluster = [], {}, {}
     for t in groups.targets:
         ind = groups.mask(t).astype(np.float64)
         n_t = int(ind.sum())
         frac = n_t / n
         s = lochness_score(adj, counts, ind, frac)
+        if lc.noise_delta > 0:
+            s = s + rng.normal(0, lc.noise_delta, size=s.shape)
         scores[t] = s
         own = ind.astype(bool)
         self_score[own] = s[own]
         obs_mean = float(np.nanmean(s[own]))
-        row = {"target": t, "n_cells": n_t, "overall_fraction_pct": 100 * frac, "mean_lochness_in_own_cells": obs_mean,
-               "median_lochness_in_own_cells": float(np.nanmedian(s[own])), "mean_lochness_all_cells": float(np.nanmean(s)), "max_lochness": float(np.nanmax(s)),
-               "pct_own_cells_enriched": float(100 * np.nanmean(s[own] > lc.enrichment_cut)), "pct_all_cells_enriched": float(100 * np.nanmean(s > lc.enrichment_cut)),
-               "mean_lochness_in_control_cells": float(np.nanmean(s[groups.control])) if groups.n_control else float("nan")}
+        row: Dict[str, Any] = {"target": t, "n_cells": n_t, "overall_fraction_pct": 100 * frac, "mean_lochness_all_cells": float(np.nanmean(s)), "mean_lochness_in_own_cells": obs_mean, "max_lochness": float(np.nanmax(s)),
+                               "pct_cells_enriched": float(100 * np.nanmean(s > lc.enrichment_cut)), "median_lochness_in_own_cells": float(np.nanmedian(s[own])), "pct_own_cells_enriched": float(100 * np.nanmean(s[own] > lc.enrichment_cut)),
+                               "mean_lochness_in_control_cells": float(np.nanmean(s[groups.control])) if groups.n_control else float("nan")}
         row["delta_own_vs_control"] = row["mean_lochness_in_own_cells"] - row["mean_lochness_in_control_cells"]
+        if clusters is not None:
+            per = pd.Series(s).groupby(clusters).mean()
+            by_cluster[t] = per.to_dict()
+            row["top_cluster"] = str(per.idxmax())
+            row["top_cluster_mean"] = float(per.max())
         if lc.n_permutations > 0:
             null = np.empty(lc.n_permutations)
             for i in range(lc.n_permutations):
@@ -124,7 +141,6 @@ def compute_lochness(adata: ad.AnnData, cfg: Config) -> LochnessResults:
             row["n_samples"] = int(per.size)
             row["max_sample_share"] = float(pd.Series(sample[own]).value_counts(normalize=True).max())
         rows.append(row)
-    # control label self score
     if groups.n_control > 0:
         cind = groups.control.astype(np.float64)
         cs = lochness_score(adj, counts, cind, groups.n_control / n)
@@ -135,10 +151,18 @@ def compute_lochness(adata: ad.AnnData, cfg: Config) -> LochnessResults:
         if "p_empirical" in summary.columns:
             from ._common import bh_fdr
             summary["fdr"] = bh_fdr(summary["p_empirical"].to_numpy())
-    info = {"method": "lochNESS = local_fraction/overall_fraction - 1 over k nearest neighbours in PCA space (Huang et al. 2023; pertTF port)",
+    bc = pd.DataFrame(by_cluster).T if by_cluster else pd.DataFrame()
+    if not bc.empty:
+        bc.index.name = "target"
+        try:
+            bc = bc[sorted(bc.columns, key=lambda c: (float(c), c))]
+        except ValueError:
+            bc = bc[sorted(bc.columns)]
+    info = {"method": "lochNESS = local_fraction/overall_fraction - 1 over k nearest neighbours in PCA space (Huang et al. 2023; pertTF port as in weili-lab/perturbseq-pipeline)",
             "use_rep": use_rep, "n_pcs": lc.n_pcs, "k_requested": lc.n_neighbors, "k_used": k, "k_capped": bool(k < lc.n_neighbors), "max_k_fraction": lc.max_k_fraction,
-            "median_neighbors": float(np.nanmedian(counts)), "n_permutations": lc.n_permutations, "enrichment_cut": lc.enrichment_cut,
-            "overall_fraction_denominator": "all cells in the object", "control_classes": groups.control_classes, "n_control_cells": groups.n_control,
+            "median_neighbors": float(np.nanmedian(counts)), "n_permutations": lc.n_permutations, "noise_delta": lc.noise_delta, "enrichment_cut": lc.enrichment_cut,
+            "overall_fraction_denominator": "all cells in the object", "control_classes": groups.control_classes, "n_control_cells": groups.n_control, "cluster_key": ckey if clusters is not None else None,
             "n_targets_scored": int(len(summary)), "n_targets_skipped": int(len(groups.skipped)), "seed": cfg.compute.seed}
-    logger.info("lochNESS: %d targets, k=%d (%s), %d permutations", len(summary), k, "capped" if info["k_capped"] else "as configured", lc.n_permutations)
-    return LochnessResults(scores, self_score, summary, pd.DataFrame(groups.skipped), pd.DataFrame(by_sample).T if by_sample else pd.DataFrame(), info)
+    if not summary.empty:
+        logger.info("lochNESS: %d targets scored, k=%d%s; strongest self-enrichment %s (mean %.2f in its own cells)", len(summary), k, " (capped)" if info["k_capped"] else "", summary.iloc[0]["target"], summary.iloc[0]["mean_lochness_in_own_cells"])
+    return LochnessResults(scores, self_score, summary, pd.DataFrame(groups.skipped), pd.DataFrame(by_sample).T if by_sample else pd.DataFrame(), bc, info)

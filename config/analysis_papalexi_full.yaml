@@ -1,21 +1,14 @@
-# Papalexi et al. 2021 ECCITE-seq demo (GEO GSE153056, pooled screen
-# GSM4633614-GSM4633618): the deterministic 1,800-cell subset BUNDLED in this
-# repository under demo/data/papalexi_eccite/ (~22 MB; provenance in its
-# README.md and demo_manifest.json). It runs from a fresh clone:
-#   petrubseq-protein run --config config/demo_papalexi.yaml
-# Rebuilding the subset from the public GEO files (maintainers only):
-#   python demo/fetch_papalexi_data.py --dest ${DATA_ROOT}/ECCITE-seq
-#   python demo/prepare_papalexi_demo.py --source ${DATA_ROOT}/ECCITE-seq --output ${DATA_ROOT}/demo/papalexi_eccite
-# Processing uses the generic input adapters (10x-style combined MTX read
-# once and split by feature type). Dataset facts: docs/datasets/PAPALEXI_ECCITE_AUDIT.md.
-# Every key not listed keeps the public default (docs/DEFAULTS.md).
-
+# SCIENTIFIC ANALYSIS CONFIG (not the public demo): the full pooled Papalexi
+# ECCITE-seq screen, every HTO singlet (17,473 cells), prepared with
+#   python demo/prepare_papalexi_demo.py --source ${DATA_ROOT}/ECCITE-seq --output ${DATA_ROOT}/analysis/papalexi_eccite_full --n-cells 17473 --min-per-stratum 1
+# (n-cells equals the number of eligible singlets, so nothing is sampled).
+# Settings follow config/demo_papalexi.yaml except: 50 RNA PCs (default), n_jobs 8.
 run:
-  name: papalexi_eccite_demo
+  name: papalexi_eccite_full
 
 dataset:
-  name: papalexi_eccite
-  input_dir: ${REPO_ROOT}/demo/data/papalexi_eccite   # bundled demo; ${REPO_ROOT} = this repository (parent of config/)
+  name: papalexi_eccite_full
+  input_dir: ${DATA_ROOT}/analysis/papalexi_eccite_full   # all 17,473 HTO singlets of the pooled screen (prepare_papalexi_demo.py, no downsampling)
   description: >
     Papalexi et al. 2021 (Nat Genet 53:322) pooled ECCITE-seq CRISPR screen in
     IFN-gamma stimulated THP-1 cells: RNA + 4 ADTs (CD86, PD-L1, PD-L2, CD366)
@@ -67,7 +60,7 @@ alignment:
 
 rna:
   input_state: raw_counts                # verified integer UMI counts (audit)
-  n_pcs: 30                              # ~1,800 cells: 30 PCs (50 is the large-dataset default)
+  n_pcs: 50                              # default
 
 protein:
   normalization: auto                    # -> clr (per-protein across cells)
@@ -91,12 +84,12 @@ report:
   title: "Papalexi ECCITE-seq demo - Perturb-CITE-seq preprocessing report"
 
 compute:
-  n_jobs: 4
+  n_jobs: 8
   seed: 0
 
 output:
-  dir: ${RESULTS_ROOT}/demo/papalexi_eccite
-  h5ad_name: papalexi_eccite_demo_processed.h5ad
+  dir: ${RESULTS_ROOT}/analysis/papalexi_eccite_full
+  h5ad_name: papalexi_eccite_full_processed.h5ad
 
 # Perturbation analyses (on by default, as in the reference pipeline): perturbation
 # strength, modules / programs, PS, lochNESS, plus the protein extension.

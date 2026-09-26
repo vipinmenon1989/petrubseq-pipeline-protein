@@ -13,8 +13,9 @@
   h1 { font-size:26px; margin:0 0 4px; }
   h2 { font-size:21px; margin:44px 0 4px; padding-top:14px; border-top:1px solid var(--line); }
   h3 { font-size:16px; margin:26px 0 6px; color:var(--muted); }
+  h4 { font-size:14px; margin:18px 0 4px; color:var(--muted); }
   .sub { color:var(--muted); font-size:13px; }
-  nav a { margin-right:14px; font-size:13px; }
+  nav a { margin-right:12px; font-size:13px; }
   table { border-collapse:collapse; width:100%; font-size:12.5px; margin:10px 0; }
   th, td { border:1px solid var(--line); padding:5px 8px; text-align:left; vertical-align:top; }
   th { background:var(--card); font-weight:600; }
@@ -31,17 +32,17 @@
   .card .k { font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.03em; }
   .warn { background:var(--warn-bg); border-left:4px solid var(--warn-line); padding:10px 14px; margin:14px 0; font-size:13.5px; border-radius:0 4px 4px 0; }
   .note { background:var(--card); border-left:4px solid var(--accent); padding:10px 14px; margin:14px 0; font-size:13.5px; border-radius:0 4px 4px 0; }
+  .extras { font-size:12px; color:var(--muted); columns:3; }
   code, pre { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size:12px; }
   pre { background:var(--card); border:1px solid var(--line); border-radius:4px; padding:12px; overflow-x:auto; line-height:1.4; }
   details { margin:14px 0; } summary { cursor:pointer; font-weight:600; color:var(--accent); }
-  .grid2 { display:grid; grid-template-columns:1fr 1fr; gap:12px; } @media (max-width:900px) { .grid2 { grid-template-columns:1fr; } }
 </style>
 </head>
 <body><div class="wrap">
 <header>
   <h1>{{ ctx.title }}</h1>
-  <div class="sub">Run <b>{{ ctx.run_name }}</b> (dataset {{ ctx.dataset }}) &middot; generated {{ ctx.generated_at }} &middot; petrubseq-pipeline-protein v{{ ctx.version }} &middot; preprocessing / QC report</div>
-  <nav><a href="#summary">Summary</a><a href="#inputs">1. Inputs</a><a href="#qc-rna">2. Cell &amp; RNA QC</a><a href="#qc-protein">3. Protein QC</a><a href="#qc-pert">4. Perturbation QC</a><a href="#rep">5. Representations</a>{% if pe %}<a href="#pe">{{ secn.pe }}. Perturbation effects</a>{% endif %}{% if cs %}<a href="#cs">{{ secn.cs }}. Cell states</a>{% endif %}<a href="#outputs">{{ secn.out }}. Outputs &amp; provenance</a></nav>
+  <div class="sub">Run <b>{{ ctx.run_name }}</b> (dataset {{ ctx.dataset }}) &middot; generated {{ ctx.generated_at }} &middot; petrubseq-pipeline-protein v{{ ctx.version }}</div>
+  <nav>{% for key, label in nav %}<a href="#{{ key }}">{{ secn[key] }}. {{ label }}</a>{% endfor %}</nav>
 </header>
 
 <h2 id="summary">Run summary</h2>
@@ -49,67 +50,130 @@
 {% if ctx.warnings %}<div class="warn"><b>Warnings ({{ ctx.warnings|length }})</b><ul>{% for w in ctx.warnings %}<li>{{ w }}</li>{% endfor %}</ul></div>{% else %}<div class="note">No warnings were raised during this run.</div>{% endif %}
 {% for n in ctx.notes %}<div class="note">{{ n }}</div>{% endfor %}
 
-<h2 id="inputs">1. Inputs and modality audit</h2>
-<h3>1.1 Modalities</h3>{{ tables.inputs }}
-<h3>1.2 Input files</h3><div class="scroll">{{ tables.input_files }}</div>
-<h3>1.3 Cell alignment</h3>{{ tables.alignment }}
+<h2 id="inputs">{{ secn.inputs }}. Inputs and modality audit</h2>
+<h3>{{ secn.inputs }}.1 Modalities</h3>{{ tables.inputs }}
+<h3>{{ secn.inputs }}.2 Input files</h3><div class="scroll">{{ tables.input_files }}</div>
+<h3>{{ secn.inputs }}.3 Cell alignment</h3>{{ tables.alignment }}
 
-<h2 id="qc-rna">2. Cell and RNA QC</h2>
-<p class="sub">Prefilter (qc.prefilter) removes obvious empty droplets and never-detected genes before metrics; strict filtering (qc.filter) applies the configured per-modality thresholds. Coverage of guides/targets is flagged, never filtered.</p>
-<h3>2.1 Filtering steps</h3>{{ tables.filtering_steps }}
-<h3>2.2 QC summary (after filtering)</h3>{{ tables.qc_summary }}
-<h3>2.3 RNA QC before filtering</h3>{% for f in figs.qc_rna_before %}{{ render(f) }}{% endfor %}
-<h3>2.4 RNA QC after filtering</h3>{% for f in figs.qc_rna_after %}{{ render(f) }}{% endfor %}
+<h2 id="qc">{{ secn.qc }}. Quality control</h2>
+<p class="sub">Prefilter (qc.prefilter) removes obvious empty droplets and never-detected genes before metrics are computed, so the before-filtering figures show the raw picture; strict filtering (qc.filter) applies the configured thresholds in the reference order (genes per cell, counts, % mitochondrial, % haemoglobin, then genes detected in too few of the retained cells). Coverage of guides and targets is flagged, never filtered.</p>
+<h3>{{ secn.qc }}.1 Filtering steps</h3>{{ tables.filtering_steps }}
+<h3>{{ secn.qc }}.2 QC summary (after filtering)</h3>{{ tables.qc_summary }}
+<h3>{{ secn.qc }}.3 Cell QC before filtering</h3>{% for f in figs.qc_rna_before %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.qc }}.4 Cell QC after filtering</h3>{% for f in figs.qc_rna_after %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.qc }}.5 Perturb-seq guide QC</h3>
+<p class="sub">Classes: single_targeting, single_control (control_class = non_targeting / intergenic / ...), multi_targeting, multi_control, mixed_control_targeting, ambiguous (guide counts present but no dominant guide), unassigned. Only single-guide cells enter the analyses below.</p>
+{{ tables.perturbation_qc }}
+<h4>Class by condition</h4>{{ tables.class_by_condition }}
+<h4>Guides per cell</h4>{{ tables.moi_summary }}
+<h4>Lowest-coverage targets</h4><div class="scroll">{{ tables.target_coverage }}</div>
+{% for f in figs.qc_perturbation %}{{ render(f) }}{% endfor %}
 
-<h2 id="qc-protein">3. Protein QC</h2>
-<h3>3.1 Protein representations and features</h3>{{ tables.protein_info }}
-<div class="scroll">{{ tables.protein_features }}</div>
-<h3>3.2 Protein QC summary</h3>{{ tables.protein_qc }}
-<h3>3.3 Protein QC before filtering</h3>{% for f in figs.qc_protein_before %}{{ render(f) }}{% endfor %}
-<h3>3.4 Protein QC after filtering</h3>{% for f in figs.qc_protein_after %}{{ render(f) }}{% endfor %}
+{% if cs %}
+<h2 id="clustering">{{ secn.clustering }}. Clustering analysis</h2>
+<p class="sub">Library-size normalization and log1p, {{ cs.n_hvg }} highly variable genes, {{ cs.n_pcs }} principal components on the scaled HVG block, a {{ cs.n_neighbors }}-nearest-neighbour graph, UMAP and Leiden clustering (resolution {{ cs.resolution }}) on every QC-passing cell; guide labels do not enter the clustering, so clusters are transcriptional states and are numbered, not named.</p>
+<h3>{{ secn.clustering }}.1 Cluster overview</h3><div class="scroll">{{ cs.summary }}</div>
+{% if cs.flags %}<div class="warn"><b>Cluster composition warnings</b><ul>{% for f in cs.flags %}<li>{{ f }}</li>{% endfor %}</ul></div>{% endif %}
+<h3>{{ secn.clustering }}.2 Embedding diagnostics</h3>{% for f in figs.rep_rna %}{{ render(f) }}{% endfor %}{% for f in figs.cs_clusters %}{{ render(f) }}{% endfor %}
+{% else %}
+<h2 id="clustering">{{ secn.clustering }}. Embedding</h2>
+<h3>{{ secn.clustering }}.1 RNA representation</h3>{{ tables.rep_rna }}{% for f in figs.rep_rna %}{{ render(f) }}{% endfor %}
+{% endif %}
 
-<h2 id="qc-pert">4. Perturbation QC</h2>
-<p class="sub">Classes: single_targeting, single_control (control_class = non_targeting / intergenic / ...), multi_targeting, multi_control, mixed_control_targeting, ambiguous (guide counts present but no dominant guide; count-derived calls only), unassigned. Multi-guide, ambiguous and unassigned cells are kept unless qc.filter.perturbation.cells says otherwise.</p>
-<h3>4.1 Perturbation QC summary</h3>{{ tables.perturbation_qc }}
-<h3>4.2 Class by condition</h3>{{ tables.class_by_condition }}
-<h3>4.3 Guides per cell</h3>{{ tables.moi_summary }}
-<h3>4.4 Lowest-coverage targets</h3><div class="scroll">{{ tables.target_coverage }}</div>
-<h3>4.5 Figures</h3>{% for f in figs.qc_perturbation %}{{ render(f) }}{% endfor %}
+{% if strength %}
+<h2 id="strength">{{ secn.strength }}. Perturbation strength</h2>
+<p class="sub">For every target gene that is also measured, the gene's <b>own</b> expression in cells carrying guides against it is compared with control cells: {{ strength.controls_described }}. Fold changes are computed on de-logged means; significance is a two-sample Kolmogorov-Smirnov test (one-sided Mann-Whitney beside it) with Benjamini-Hochberg correction across targets, per control arm. A target is called <b>effective</b> at FDR &lt; {{ strength.fdr_alpha }} with a negative log2 fold change under <b>{{ strength.primary_label }}</b>{% if strength.fallback %} (the requested primary control was unavailable){% endif %}.</p>
+<h3>{{ secn.strength }}.1 Results across all targets</h3>
+<div class="cards">{% for k, v in strength.cards %}<div class="card"><div class="v">{{ v }}</div><div class="k">{{ k }}</div></div>{% endfor %}</div>
+{% for f in figs.strength_overview %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.strength }}.2 Ranked target table</h3><div class="scroll">{{ strength.table }}</div>
+{% if strength.skipped %}<h3>{{ secn.strength }}.3 Targets that could not be tested</h3><div class="scroll">{{ strength.skipped }}</div>{% endif %}
+<h3>{{ secn.strength }}.{% if strength.skipped %}4{% else %}3{% endif %} Strongest perturbation effects</h3>
+<p class="sub">The {{ figs.strength_per_target|length }} strongest effects under the primary control. Every tested target has the same figure on disk under <code>figures/perturbation_strength/per_target/</code>.</p>
+{% for f in figs.strength_per_target %}{{ render(f) }}{% endfor %}
+{% if extras.strength %}<details><summary>{{ extras.strength|length }} further per-target figures on disk</summary><div class="extras">{% for n in extras.strength %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+{% endif %}
 
-<h2 id="rep">5. Representations</h2>
-<h3>5.1 RNA</h3>{{ tables.rep_rna }}{% for f in figs.rep_rna %}{{ render(f) }}{% endfor %}
-<h3>5.2 Protein</h3>{{ tables.rep_protein }}{% for f in figs.rep_protein %}{{ render(f) }}{% endfor %}
-<h3>5.3 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
-{% for name, df in group_summaries %}<h3>{{ name }} summary</h3><div class="scroll">{{ df }}</div>{% endfor %}
+{% if enr %}
+<h2 id="enrichment">{{ secn.enrichment }}. Perturbation enrichment across clusters</h2>
+<p class="sub">Does losing a gene push cells into a particular transcriptional state? For every (target, cluster) pair a 2x2 table (target cells in / outside the cluster versus reference cells in / outside) is tested with Fisher's exact test{% if enr.stratified %}, stratified by {{ enr.stratify_by }} (Cochran-Mantel-Haenszel){% endif %}; both reference definitions ({{ enr.controls_described }}) are reported, and <b>{{ enr.control_label }}</b> drives the significance calls. Odds ratios carry a Haldane-Anscombe correction; pairs with few reference cells are flagged low-power; BH-FDR is applied within each arm.</p>
+<h3>{{ secn.enrichment }}.1 Is there any association at all?</h3>
+<p>Omnibus chi-square = {{ enr.chi2 }} on {{ enr.dof }} degrees of freedom, permutation p = {{ enr.p_perm }} ({{ enr.pct_small }}% of expected counts below 5, so the chi-square is a screen only). {{ enr.n_hits }} of {{ enr.n_tests }} target/cluster pairs are significant at FDR &lt; {{ enr.fdr_alpha }}, involving {{ enr.n_targets_with_hits }} of {{ enr.n_targets }} targets across {{ enr.n_clusters }} clusters; {{ enr.n_low_power }} pairs are low-power.{% if enr.top_shift %} The largest composition shift is {{ enr.top_shift.target }} ({{ '%.1f' % enr.top_shift.composition_shift_pct }}% of its cells sit in different clusters than the reference).{% endif %}</p>
+<h3>{{ secn.enrichment }}.2 Enrichment across all targets and clusters</h3>{% for f in figs.cs_enrichment %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.enrichment }}.3 Significant target/cluster pairs</h3><div class="scroll">{{ enr.table }}</div>
+<h3>{{ secn.enrichment }}.4 Strongest cluster shifts</h3>{% for f in figs.cs_enrichment_per_target %}{{ render(f) }}{% endfor %}
+{% if extras.enrichment %}<details><summary>{{ extras.enrichment|length }} further per-target figures on disk</summary><div class="extras">{% for n in extras.enrichment %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+{% if enr.comparison %}<h3>{{ secn.enrichment }}.5 Cluster enrichment and lochNESS, side by side</h3><p class="sub">Descriptive only: the strongest cluster result and the lochNESS summary per target, without a combined statistic.</p><div class="scroll">{{ enr.comparison }}</div>{% endif %}
+{% endif %}
+
+{% if ps %}
+<h2 id="ps">{{ secn.ps }}. Per-cell perturbation response</h2>
+<p class="sub">The perturbation-strength test treats every cell carrying a guide as one group. This section scores <b>each cell individually</b> (Song et al. 2025, PS_python definition): for each target the expression signature of the perturbation is learned from target versus control cells and every cell is projected onto it, giving a score in [0, 1]. Combined with the target's own expression this classifies each perturbed cell as a successful knockdown, an escaper, a non-responder or low signal (cuts: score {{ ps.threshold }}, expression at the control {{ ps.cut_method }}). {{ ps.n_targets }} targets scored; median {{ ps.median_kd }}% of perturbed cells classed as successful knockdown, median {{ ps.median_escaper }}% escapers; best {{ ps.best }} ({{ ps.best_kd }}%), most escapers {{ ps.worst_escaper }} ({{ ps.worst_escaper_pct }}%).</p>
+<h3>{{ secn.ps }}.1 Knockdown efficiency across targets</h3>{% for f in figs.pe_ps %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.ps }}.2 Per-target summary</h3><div class="scroll">{{ ps.table }}</div>
+{% if ps.skipped %}<details><summary>Targets not scored ({{ ps.n_skipped }})</summary>{{ ps.skipped }}</details>{% endif %}
+<h3>{{ secn.ps }}.3 Per-cell outcome for the strongest targets</h3>{% for f in figs.pe_ps_per_target %}{{ render(f) }}{% endfor %}
+{% if extras.ps %}<details><summary>{{ extras.ps|length }} further quadrant figures on disk</summary><div class="extras">{% for n in extras.ps %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+<h3>{{ secn.ps }}.4 The supervised LDA embedding</h3>
+{% if ps.has_lda %}<p class="sub">The clustering UMAP is unsupervised and knows nothing about which guide a cell carries. This embedding trains linear discriminant analysis on the perturbation labels and embeds that space, so the axes are chosen to separate perturbations; cells outside the trained classes (ambiguous, unassigned, unscored targets) have no coordinates.</p>{% for f in figs.pe_ps_lda %}{{ render(f) }}{% endfor %}{% for f in figs.pe_ps_lda_per_target %}{{ render(f) }}{% endfor %}
+{% if extras.lda %}<details><summary>{{ extras.lda|length }} further per-target LDA figures on disk</summary><div class="extras">{% for n in extras.lda %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+{% else %}<p class="sub">The LDA embedding was not built{% if ps.lda_note %}: {{ ps.lda_note }}{% endif %}.</p>{% endif %}
+{% endif %}
+
+{% if loch %}
+<h2 id="lochness">{{ secn.lochness }}. lochNESS neighbourhood enrichment</h2>
+<p class="sub">For every cell and every perturbation, lochNESS = (share of the cell's {{ loch.k }} nearest neighbours carrying the perturbation) / (the perturbation's overall share) - 1: 0 is the background rate, positive means locally over-represented. It is continuous and cluster-free, so it also sees structure inside a cluster or across a boundary that the cluster test cannot. {{ loch.n_targets }} targets scored; {{ loch.n_positive }} have a mean score above {{ loch.cut }} in their own cells; strongest self-enrichment {{ loch.best }} ({{ loch.best_score }}).</p>
+<h3>{{ secn.lochness }}.1 Across all perturbations</h3>{% for f in figs.pe_lochness %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.lochness }}.2 Per-target summary</h3><div class="scroll">{{ loch.table }}</div>
+<h3>{{ secn.lochness }}.3 Per-perturbation maps</h3>{% for f in figs.pe_lochness_per_target %}{{ render(f) }}{% endfor %}
+{% if extras.lochness %}<details><summary>{{ extras.lochness|length }} further per-perturbation maps on disk</summary><div class="extras">{% for n in extras.lochness %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+{% endif %}
+
+{% if mods %}
+<h2 id="modules">{{ secn.modules }}. Co-functional modules &amp; gene programs</h2>
+<p class="sub">A perturbation x gene matrix of log2 fold change versus {{ mods.control_label }} over {{ mods.n_genes }} genes ({{ mods.gene_selection }}) for {{ mods.n_perturbations }} perturbations. Genes are clustered into <b>{{ mods.n_programs }} programs</b> ({{ mods.program_correlation }} correlation, {{ mods.linkage }} linkage) and perturbations into <b>{{ mods.n_modules }} co-functional modules</b> ({{ mods.module_correlation }}); a DE gene of a perturbation is one with |log2FC| &gt; {{ mods.hub_lfc }} and FDR &lt; {{ mods.de_fdr }}. Top hub: {{ mods.top_hub }} ({{ mods.top_hub_n }} DE genes); {{ mods.n_tf_edges }} regulatory edges between perturbed genes. Module (M) and program (P) labels are arbitrary cluster ids.</p>
+<h3>{{ secn.modules }}.1 The regulome map</h3>{% for f in figs.pe_gene_programs %}{{ render(f) }}{% endfor %}{% for f in figs.pe_gene_programs_umap %}{{ render(f) }}{% endfor %}
+{% if extras.programs %}<details><summary>{{ extras.programs|length }} further program figures on disk</summary><div class="extras">{% for n in extras.programs %}<div>{{ n }}</div>{% endfor %}</div></details>{% endif %}
+<h3>{{ secn.modules }}.2 Co-functional modules (perturbations)</h3><div class="scroll">{{ mods.modules }}</div>
+<h3>{{ secn.modules }}.3 Gene programs</h3><p class="sub">Top genes per program: {% for p, g in mods.program_genes.items() %}<b>{{ p }}</b>: {{ g|join(', ') }}; {% endfor %}</p><div class="scroll">{{ mods.programs }}</div>
+<h3>{{ secn.modules }}.4 Module &rarr; program strength</h3><div class="scroll">{{ mods.module_program }}</div>
+<h3>{{ secn.modules }}.5 Hub transcription factors</h3><div class="scroll">{{ mods.hubs }}</div>
+{% endif %}
+
+<h2 id="protein-qc">{{ secn.protein_qc }}. Protein QC</h2>
+<h3>{{ secn.protein_qc }}.1 Protein representations and features</h3>{{ tables.protein_info }}<div class="scroll">{{ tables.protein_features }}</div>
+<h3>{{ secn.protein_qc }}.2 Protein QC summary</h3>{{ tables.protein_qc }}
+<h3>{{ secn.protein_qc }}.3 Protein QC before filtering</h3>{% for f in figs.qc_protein_before %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.protein_qc }}.4 Protein QC after filtering</h3>{% for f in figs.qc_protein_after %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.protein_qc }}.5 Protein representation</h3>{{ tables.rep_protein }}{% for f in figs.rep_protein %}{{ render(f) }}{% endfor %}
 
 {% if pe %}
-<h2 id="pe">{{ secn.pe }}. Perturbation effects</h2>
-<p class="sub">Downstream analyses on the processed object. Perturbed cells = single-guide targeting cells of one target; controls = single-guide non-targeting cells; ambiguous and multi-guide cells are excluded. <b>Perturbation target</b> = the gene the guide acts on; <b>response genes</b> = genes that change downstream; <b>gene program</b> (P) = a cluster of co-responding genes; <b>perturbation module</b> (M) = a cluster of perturbations with similar responses. Associations below are correlations, not evidence of mediation or causality; methods and references in docs/PERTURBATION_EFFECTS.md.</p>
-<h3>{{ secn.pe }}.1 Perturbation-response score (PS)</h3>{{ pe.info.ps }}{{ pe.ps }}{% for f in figs.pe_ps %}{{ render(f) }}{% endfor %}<details><summary>Targets not scored</summary>{{ pe.ps_skipped }}</details>
-<h3>{{ secn.pe }}.2 lochNESS</h3>{{ pe.info.lochness }}{{ pe.lochness }}{% for f in figs.pe_lochness %}{{ render(f) }}{% endfor %}
-<h3>{{ secn.pe }}.3 Gene programs and perturbation modules</h3>{{ pe.info.modules }}<h4>Perturbation modules</h4>{{ pe.modules }}<h4>Gene programs (top 10 genes per program by |log2FC|)</h4>{{ pe.programs }}{% for f in figs.pe_gene_programs %}{{ render(f) }}{% endfor %}
-<h3>{{ secn.pe }}.4 Protein effects</h3>{{ pe.info.protein }}{{ pe.protein }}{% for f in figs.pe_protein_effects %}{{ render(f) }}{% endfor %}
-<h3>{{ secn.pe }}.5 RNA-protein concordance</h3>{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
-<h3>{{ secn.pe }}.6 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
+<h2 id="protein-effects">{{ secn.protein_effects }}. Protein effects</h2>
+<p class="sub">Multimodal extension. For each target and each measured protein (CLR of the ADT counts, never the counts), perturbed versus control cells: difference of means, Cohen's d, two-sided Mann-Whitney U with BH-FDR over every target x protein test, and per-sample / per-guide sign consistency.</p>
+{{ pe.info.protein }}{{ pe.protein }}{% for f in figs.pe_protein_effects %}{{ render(f) }}{% endfor %}
+
+<h2 id="concordance">{{ secn.concordance }}. RNA-protein concordance</h2>
+<p class="sub">Multimodal extension. Associations kept at the level where each quantity is defined: PS versus protein within a target's cells, lochNESS versus protein effect across targets, gene-program activity versus protein at the cell and target level. These are correlations, not evidence of mediation or causality.</p>
+{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
+
+<h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
+<h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
+{% for name, df in group_summaries %}<h4>{{ name }} summary</h4><div class="scroll">{{ df }}</div>{% endfor %}
+<h3>{{ secn.multimodal }}.2 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
+{% else %}
+<h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
+<h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
+{% for name, df in group_summaries %}<h4>{{ name }} summary</h4><div class="scroll">{{ df }}</div>{% endfor %}
 {% endif %}
-{% if cs %}
-<h2 id="cs">{{ secn.cs }}. Cell states and perturbation enrichment</h2>
-<p class="sub">Leiden clustering divides the cells into discrete transcriptional states using the RNA neighbour graph (guide labels are not used). For each target and cluster, a Fisher exact test asks whether the target's single-guide cells are over- or under-represented in that cluster compared with control cells; ambiguous, multi-guide and unassigned cells are clustered but not tested. This is complementary to lochNESS: cluster enrichment needs discrete cluster boundaries and asks whether a perturbation prefers a defined state, while lochNESS is cluster-free and can see concentration inside one cluster or across cluster boundaries. A perturbation can show either, both or neither; they are not combined. Clusters are numbered, not named, and their number depends on the Leiden resolution.</p>
-<h3>{{ secn.cs }}.1 Clusters</h3>{{ cs.clustering }}{% for f in figs.cs_clusters %}{{ render(f) }}{% endfor %}
-{% if cs.flags %}<div class="warn"><b>Cluster composition warnings</b><ul>{% for f in cs.flags %}<li>{{ f }}</li>{% endfor %}</ul></div>{% endif %}
-<details><summary>Cluster summary (sizes, class composition, dominant sample/lane, median depth)</summary><div class="scroll">{{ cs.summary }}</div></details>
-<h3>{{ secn.cs }}.2 Perturbation x cluster enrichment</h3>{{ cs.enrichment_info }}<h4>Omnibus target x cluster association (screen)</h4>{{ cs.omnibus }}{% for f in figs.cs_enrichment %}{{ render(f) }}{% endfor %}
-<h4>{% if cs.significant_any %}Significant pairs{% else %}Strongest pairs (none significant){% endif %}</h4><div class="scroll">{{ cs.top }}</div>
-<h3>{{ secn.cs }}.3 Cluster enrichment and lochNESS, side by side</h3><p class="sub">Descriptive only: the strongest cluster result and the lochNESS summary per target, without a combined statistic.</p><div class="scroll">{{ cs.comparison }}</div>
-{% endif %}
-<h2 id="outputs">{{ secn.out }}. Outputs and provenance</h2>
-<h3>6.1 Deliverables</h3>{{ tables.outputs }}
-<h3>6.2 Processed object</h3><pre>{{ ctx.adata_repr }}</pre>{{ tables.schema }}
-<h3>6.3 Stage timings (seconds)</h3>{{ tables.timings }}
+
+<h2 id="outputs">{{ secn.outputs }}. Outputs and provenance</h2>
+<h3>{{ secn.outputs }}.1 Deliverables</h3>{{ tables.outputs }}
+<h3>{{ secn.outputs }}.2 Processed object</h3><pre>{{ ctx.adata_repr }}</pre>{{ tables.schema }}
+<h3>{{ secn.outputs }}.3 Stage timings (seconds)</h3>{{ tables.timings }}
 <details><summary>Table manifest ({{ n_tables }} tables)</summary>{{ tables.table_manifest }}</details>
 <details><summary>Figure manifest ({{ n_figures }} figures)</summary><div class="scroll">{{ tables.figure_manifest }}</div></details>
 <details><summary>Resolved configuration</summary><pre>{{ ctx.config_yaml }}</pre></details>
 <details><summary>Software versions</summary>{{ tables.versions }}</details>
 <details><summary>Provenance</summary>{{ tables.provenance }}</details>
-<footer class="sub" style="margin-top:40px">petrubseq-pipeline-protein v{{ ctx.version }}. Preprocessing/QC report only: no perturbation-effect, concordance or predictive analyses are included.</footer>
+<footer class="sub" style="margin-top:40px">petrubseq-pipeline-protein v{{ ctx.version }}. RNA analyses follow the reference Perturb-seq pipeline (perturbation strength, cluster enrichment, PS, lochNESS, modules/programs); protein sections are multimodal additions.</footer>
 </div></body></html>

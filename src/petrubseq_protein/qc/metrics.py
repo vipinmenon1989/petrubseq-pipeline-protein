@@ -41,12 +41,14 @@ def rna_qc(adata: ad.AnnData, cfg: Config) -> Dict[str, Any]:
 
     rcfg = cfg.rna
     var = adata.var
-    var["mt"] = var.index.str.startswith(rcfg.mito_prefix)
-    var["ribo"] = var.index.str.startswith(tuple(rcfg.ribo_prefixes))
-    info: Dict[str, Any] = {"n_mito_genes": int(var["mt"].sum()), "n_ribo_genes": int(var["ribo"].sum())}
+    names = var.index.str.upper()
+    var["mt"] = names.str.startswith(rcfg.mito_prefix.upper())
+    var["ribo"] = names.str.startswith(tuple(p.upper() for p in rcfg.ribo_prefixes))
+    var["hb"] = names.str.contains(rcfg.hb_pattern, regex=True)
+    info: Dict[str, Any] = {"n_mito_genes": int(var["mt"].sum()), "n_ribo_genes": int(var["ribo"].sum()), "n_hb_genes": int(var["hb"].sum())}
     layer = "counts" if "counts" in adata.layers else ("reconstructed_counts" if "reconstructed_counts" in adata.layers else None)
     if layer is not None:
-        sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo"], layer=layer, percent_top=None, log1p=False, inplace=True)
+        sc.pp.calculate_qc_metrics(adata, qc_vars=["mt", "ribo", "hb"], layer=layer, percent_top=None, log1p=False, inplace=True)
         info["source"] = f"layers['{layer}']"
     else:
         X = sp.csr_matrix(adata.X)
@@ -63,6 +65,7 @@ def rna_qc(adata: ad.AnnData, cfg: Config) -> Dict[str, Any]:
         with np.errstate(divide="ignore", invalid="ignore"):
             adata.obs["pct_counts_mt"] = 100 * np.asarray(E[:, var["mt"].to_numpy()].sum(axis=1)).ravel() / tot
             adata.obs["pct_counts_ribo"] = 100 * np.asarray(E[:, var["ribo"].to_numpy()].sum(axis=1)).ravel() / tot
+            adata.obs["pct_counts_hb"] = 100 * np.asarray(E[:, var["hb"].to_numpy()].sum(axis=1)).ravel() / tot
         adata.var["n_cells_by_counts"] = np.diff(X.tocsc().indptr)
     obs = adata.obs
     flags = pd.DataFrame(index=obs.index)
@@ -73,14 +76,14 @@ def rna_qc(adata: ad.AnnData, cfg: Config) -> Dict[str, Any]:
     flags["rna_outlier_low_genes"], flags["rna_outlier_high_genes"], thr["n_genes_by_counts"] = lo, hi, t
     fr = cfg.qc.filter.rna
     flags["rna_low_genes"] = obs["n_genes_by_counts"].to_numpy() < fr.min_genes if fr.min_genes is not None else False
-    flags["rna_high_mt"] = obs["pct_counts_mt"].to_numpy() > fr.max_pct_mt if fr.max_pct_mt is not None else False
+    flags["rna_high_mt"] = obs["pct_counts_mt"].to_numpy() >= fr.max_pct_mt if fr.max_pct_mt is not None else False
     if fr.min_counts is not None:
         flags["rna_low_counts"] = obs["total_counts"].to_numpy() < fr.min_counts
     flags["rna_qc_fail"] = flags[["rna_low_genes", "rna_high_mt"] + (["rna_low_counts"] if "rna_low_counts" in flags else [])].any(axis=1)
     for c in flags.columns:
         adata.obs[c] = flags[c].to_numpy()
-    info["thresholds"] = {"min_genes": fr.min_genes, "max_pct_mt": fr.max_pct_mt, "min_counts": fr.min_counts, "n_mads": cfg.qc.flags.rna_n_mads, "mad": thr}
-    info["summary"] = {k: {"median": float(np.nanmedian(obs[k])), "min": float(np.nanmin(obs[k])), "max": float(np.nanmax(obs[k]))} for k in ("total_counts", "n_genes_by_counts", "pct_counts_mt", "pct_counts_ribo")}
+    info["thresholds"] = {"min_genes": fr.min_genes, "max_pct_mt": fr.max_pct_mt, "max_pct_hb": fr.max_pct_hb, "min_counts": fr.min_counts, "min_cells_per_gene": fr.min_cells_per_gene, "n_mads": cfg.qc.flags.rna_n_mads, "mad": thr}
+    info["summary"] = {k: {"median": float(np.nanmedian(obs[k])), "min": float(np.nanmin(obs[k])), "max": float(np.nanmax(obs[k]))} for k in ("total_counts", "n_genes_by_counts", "pct_counts_mt", "pct_counts_ribo", "pct_counts_hb") if k in obs.columns}
     info["flag_counts"] = {c: int(flags[c].sum()) for c in flags.columns}
     return info
 

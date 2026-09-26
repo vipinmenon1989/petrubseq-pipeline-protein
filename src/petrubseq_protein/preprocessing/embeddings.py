@@ -25,16 +25,39 @@ from ..config import Config
 logger = logging.getLogger("petrubseq_protein")
 
 
-def _pca_on(X: np.ndarray | sp.spmatrix, n_comps: int, scale: bool, max_value: Optional[float], seed: int) -> Dict[str, Any]:
+def _pca_on(X: np.ndarray | sp.spmatrix, n_comps: int, scale: bool, max_value: Optional[float], seed: int, reference_path: bool = False) -> Dict[str, Any]:
+    """PCA of a (cells x features) block, optionally scaled first, computed in float64.
+
+    Both modalities follow one numerical principle: the working matrix handed to
+    ``sc.pp.scale`` / ``sc.tl.pca`` is float64, so the arpack solver is
+    deterministic to ~1e-8 across runs. Scaling a float32 dense copy instead gives
+    PCs that differ by ~1e-3 (RNA) or ~1e-5 (protein) from run to run, enough to
+    change neighbour weights, the Leiden partition and the UMAP.
+
+    ``reference_path`` is the RNA route and reproduces the reference pipeline's
+    ``cluster.embed_and_cluster`` to the bit: the sparse HVG block is handed to
+    ``sc.pp.scale`` as is (scanpy densifies it in float64). The protein route
+    receives a dense block and is cast to float64 explicitly before scaling.
+    The returned coordinates and loadings are stored as float32 (a deterministic
+    cast of a deterministic float64 result; keeps the h5ad size unchanged);
+    variances stay float64.
+    """
     import scanpy as sc
 
-    tmp = ad.AnnData(X=X.copy() if sp.issparse(X) else np.ascontiguousarray(X, dtype=np.float32))
-    if scale:
-        if sp.issparse(tmp.X):
-            tmp.X = tmp.X.toarray()
-        sc.pp.scale(tmp, zero_center=True, max_value=max_value)
-    sc.pp.pca(tmp, n_comps=n_comps, svd_solver="arpack", random_state=seed)
-    return {"X_pca": tmp.obsm["X_pca"].astype(np.float32), "loadings": tmp.varm["PCs"].astype(np.float32), "variance_ratio": np.asarray(tmp.uns["pca"]["variance_ratio"], dtype=float), "variance": np.asarray(tmp.uns["pca"]["variance"], dtype=float)}
+    if reference_path:
+        tmp = ad.AnnData(X=sp.csr_matrix(X, dtype=np.float32).copy() if sp.issparse(X) else np.asarray(X, dtype=np.float64).copy())
+        if scale:
+            sc.pp.scale(tmp, max_value=max_value)
+        else:
+            tmp.X = tmp.X.toarray().astype(np.float64) if sp.issparse(tmp.X) else tmp.X
+    else:
+        dense = X.toarray() if sp.issparse(X) else np.asarray(X)
+        tmp = ad.AnnData(X=np.ascontiguousarray(dense, dtype=np.float64))
+        if scale:
+            sc.pp.scale(tmp, zero_center=True, max_value=max_value)
+    assert tmp.X.dtype == np.float64, tmp.X.dtype
+    sc.tl.pca(tmp, n_comps=n_comps, svd_solver="arpack", random_state=seed)
+    return {"X_pca": tmp.obsm["X_pca"].astype(np.float32), "loadings": tmp.varm["PCs"].astype(np.float32), "variance_ratio": np.asarray(tmp.uns["pca"]["variance_ratio"], dtype=float), "variance": np.asarray(tmp.uns["pca"]["variance"], dtype=float), "working_dtype": "float64"}
 
 
 def _neighbors_umap(adata: ad.AnnData, rep: str, key: str, n_neighbors: int, n_pcs: Optional[int], cfg: Config, umap_key: str, do_umap: bool) -> Dict[str, Any]:
@@ -79,12 +102,12 @@ def rna_embedding(adata: ad.AnnData, cfg: Config) -> Dict[str, Any]:
         adata.var["highly_variable"] = True
         info["hvg"] = {"flavor": None, "n_top_genes": int(n_genes), "note": "all genes used"}
     n_comps = int(min(rcfg.n_pcs, adata.n_obs - 1, int(mask.sum()) - 1))
-    res = _pca_on(adata.X[:, mask], n_comps, rcfg.scale, rcfg.scale_max_value, cfg.compute.seed)
+    res = _pca_on(adata.X[:, mask], n_comps, rcfg.scale, rcfg.scale_max_value, cfg.compute.seed, reference_path=True)
     adata.obsm["X_pca"] = res["X_pca"]
     load = np.zeros((n_genes, n_comps), dtype=np.float32)
     load[mask] = res["loadings"]
     adata.varm["PCs"] = load
-    adata.uns["pca"] = {"variance_ratio": res["variance_ratio"], "variance": res["variance"], "params": {"n_comps": n_comps, "scaled": rcfg.scale, "scale_max_value": rcfg.scale_max_value, "use_highly_variable": bool(use_hvg), "svd_solver": "arpack", "random_state": cfg.compute.seed}}
+    adata.uns["pca"] = {"variance_ratio": res["variance_ratio"], "variance": res["variance"], "params": {"n_comps": n_comps, "scaled": rcfg.scale, "scale_max_value": rcfg.scale_max_value, "use_highly_variable": bool(use_hvg), "svd_solver": "arpack", "random_state": cfg.compute.seed, "working_dtype": res["working_dtype"], "stored_dtype": "float32"}}
     info["pca"] = {"key": "X_pca", "n_comps": n_comps, "scaled": rcfg.scale, "scale_max_value": rcfg.scale_max_value, "variance_ratio_top10": [round(float(v), 4) for v in res["variance_ratio"][:10]], "variance_ratio_total": round(float(res["variance_ratio"].sum()), 4)}
     n_pcs = int(min(cfg.neighbors.n_pcs or n_comps, n_comps))
     info.update(_neighbors_umap(adata, "X_pca", "rna", cfg.neighbors.n_neighbors, n_pcs, cfg, "X_umap_rna", cfg.umap.enabled))
@@ -112,12 +135,13 @@ def protein_embedding(adata: ad.AnnData, cfg: Config, emb_key: Optional[str]) ->
     n_feat = len(cols)
     ok = P[cols].notna().all(axis=1).to_numpy()
     n_comps = int(min(pcfg.n_pcs, n_feat - 1, int(ok.sum()) - 1))
-    res = _pca_on(P.loc[ok, cols].to_numpy(dtype=np.float32), n_comps, pcfg.scale, pcfg.scale_max_value, cfg.compute.seed)
+    # explicit float64 working matrix: scaling and arpack run in float64 (deterministic across runs)
+    res = _pca_on(P.loc[ok, cols].to_numpy(dtype=np.float64), n_comps, pcfg.scale, pcfg.scale_max_value, cfg.compute.seed)
     pca = np.full((adata.n_obs, n_comps), np.nan, dtype=np.float32)
     pca[ok] = res["X_pca"]
     adata.obsm["X_pca_protein"] = pca
-    adata.uns["pca_protein"] = {"variance_ratio": res["variance_ratio"], "variance": res["variance"], "loadings": pd.DataFrame(res["loadings"], index=cols, columns=[f"PC{i+1}" for i in range(n_comps)]), "params": {"representation": emb_key, "features": cols, "n_comps": n_comps, "scaled": pcfg.scale, "scale_max_value": pcfg.scale_max_value, "random_state": cfg.compute.seed}}
-    info["pca"] = {"key": "X_pca_protein", "representation": emb_key, "n_features": n_feat, "isotypes_excluded": pcfg.exclude_isotypes_from_embedding, "n_comps": n_comps, "scaled": pcfg.scale, "cells_used": int(ok.sum()), "variance_ratio": [round(float(v), 4) for v in res["variance_ratio"]], "variance_ratio_total": round(float(res["variance_ratio"].sum()), 4)}
+    adata.uns["pca_protein"] = {"variance_ratio": res["variance_ratio"], "variance": res["variance"], "loadings": pd.DataFrame(res["loadings"], index=cols, columns=[f"PC{i+1}" for i in range(n_comps)]), "params": {"representation": emb_key, "features": cols, "n_comps": n_comps, "scaled": pcfg.scale, "scale_max_value": pcfg.scale_max_value, "random_state": cfg.compute.seed, "svd_solver": "arpack", "working_dtype": res["working_dtype"], "stored_dtype": "float32"}}
+    info["pca"] = {"key": "X_pca_protein", "representation": emb_key, "n_features": n_feat, "isotypes_excluded": pcfg.exclude_isotypes_from_embedding, "n_comps": n_comps, "scaled": pcfg.scale, "working_dtype": res["working_dtype"], "cells_used": int(ok.sum()), "variance_ratio": [round(float(v), 4) for v in res["variance_ratio"]], "variance_ratio_total": round(float(res["variance_ratio"].sum()), 4)}
     do_umap = cfg.umap.enabled and n_feat >= cfg.umap.min_features
     if not do_umap and cfg.umap.enabled:
         info["skipped_umap"] = f"only {n_feat} protein features (< umap.min_features={cfg.umap.min_features})"

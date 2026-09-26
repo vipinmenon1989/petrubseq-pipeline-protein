@@ -1,3 +1,5 @@
+> **Superseded (2026-09-26)** by `REFERENCE_PIPELINE_COMPLETE_AUDIT.md` (complete stage-by-stage audit of the reference repository) and `PARITY_RESULTS.md` (numerical parity after the corrections). Kept for the history of the earlier, partial audits; where they disagree, the complete audit is authoritative.
+
 # Cell-state clustering and perturbation × cluster enrichment: reference audit (Stage F)
 
 Audited 2026-09-26 from the group's local checkout of weili-lab/perturbseq-pipeline

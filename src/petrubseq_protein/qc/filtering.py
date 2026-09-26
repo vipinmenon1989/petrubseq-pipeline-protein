@@ -138,7 +138,10 @@ def strict_filter(adata: ad.AnnData, cfg: Config, audit: FilterAudit) -> Tuple[a
     if r.min_counts is not None and "total_counts" in obs:
         apply("rna_min_counts", "rna", f"total counts >= {r.min_counts}", obs["total_counts"].to_numpy(float) < r.min_counts)
     if r.max_pct_mt is not None and "pct_counts_mt" in obs:
-        apply("rna_max_pct_mt", "rna", f"% mitochondrial <= {r.max_pct_mt}", obs["pct_counts_mt"].to_numpy(float) > r.max_pct_mt)
+        # reference: keep pct_counts_mt < max (strict), so cells at exactly the threshold are removed
+        apply("rna_max_pct_mt", "rna", f"% mitochondrial < {r.max_pct_mt}", obs["pct_counts_mt"].to_numpy(float) >= r.max_pct_mt)
+    if r.max_pct_hb is not None and "pct_counts_hb" in obs:
+        apply("rna_max_pct_hb", "rna", f"% haemoglobin < {r.max_pct_hb}", obs["pct_counts_hb"].to_numpy(float) >= r.max_pct_hb)
     p = fcfg.protein
     has_counts = "protein_total_counts" in obs
     if p.min_total_counts is not None and has_counts:
@@ -161,7 +164,15 @@ def strict_filter(adata: ad.AnnData, cfg: Config, audit: FilterAudit) -> Tuple[a
         raise ValueError(f"QC filtering removed every cell ({adata.n_obs}); relax qc.filter thresholds or set qc.filter.enabled: false")
     if not alive.all():
         adata = adata[alive].copy()
-    logger.info("strict filtering: %d -> %d cells", len(alive), int(alive.sum()))
+    # reference: the gene filter is applied again after the cell filters, so genes
+    # that fall below min_cells_per_gene once cells are removed leave the matrix
+    if r.min_cells_per_gene:
+        before = (adata.n_obs, adata.n_vars)
+        keep_g = _n_cells_per_gene(adata) >= r.min_cells_per_gene
+        if not keep_g.all():
+            adata = adata[:, keep_g].copy()
+        audit.record("rna_min_cells_per_gene", "rna", f"cells with gene >= {r.min_cells_per_gene}", before, (adata.n_obs, adata.n_vars))
+    logger.info("strict filtering: %d -> %d cells, %d -> %d genes", len(alive), int(alive.sum()), n_genes, adata.n_vars)
     return adata, removed_by
 
 

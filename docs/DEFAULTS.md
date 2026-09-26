@@ -13,16 +13,21 @@ values tuned for a pleasing UMAP.
 |---|---|---|
 | inputs | 10x MTX / H5 / h5ad, guide-count matrices, guide FASTQs | dense text matrices (SCP format), 10x MTX / H5 (combined or per modality, multi-lane), h5ad (feature types or slots), guide-count matrices, provided guide assignments; no FASTQ processing |
 | guide calling | dominant-guide rule (`min_umi 3`, `dominance_ratio 2`) → `targeting` / `non-targeting` / `ambiguous` / `unassigned` | same dominant rule (plus a `threshold` rule for multi-guide lists) or a provided assignment, chosen explicitly (`perturbation.assignment.source`); classes `single_targeting` / `single_control` / `multi_targeting` / `multi_control` / `mixed_control_targeting` / `ambiguous` / `unassigned`; detected guide lists kept separately |
-| RNA QC | `calculate_qc_metrics` (mt, ribo, hb), MAD 3 flags, prefilter 200/3, strict filter ≥ 1000 genes / < 20 % mt, Scrublet doublets | same metrics (mt, ribo), MAD 5 flags, prefilter 200/3, strict filter ≥ 500 genes / ≤ 20 % mt with an audit table; before/after figures; no doublet detection |
+| RNA QC | `calculate_qc_metrics` (mt, ribo, hb), prefilter 200/3, strict filter ≥ 1000 genes / < 20 % mt / genes in ≥ 3 retained cells | same metrics (mt, ribo, hb), MAD 5 flags, prefilter 200/3, **same strict filter** (≥ 1000 genes, < 20 % mt, optional % hb, genes in ≥ 3 cells re-applied) with an audit table; before/after figures |
 | protein QC | – | total / targeting / isotype ADT, proteins detected, isotype %, MAD + extreme flags, per-antibody background flag |
 | perturbation QC | guide QC report; `perturbation.min_cells_per_target: 10` | `guide_counts`, `target_counts`, condition × guide/target coverage with `low_coverage` flags at 10 cells |
-| normalization | `normalize_total(target_sum=null)` + `log1p`; raw kept in `layers['counts']`, lognorm in `layers['lognorm']` | state detection; raw input → `normalize_total(1e4)` + `log1p` with `layers['counts']`; log-normalized input preserved with `layers['reconstructed_counts']` when recoverable |
+| normalization | `normalize_total(target_sum=null)` + `log1p`; raw kept in `layers['counts']`, lognorm in `layers['lognorm']` | state detection; raw input → `normalize_total(target_sum=null` = median library size`)` + `log1p` with `layers['counts']` (same as the reference); log-normalized input preserved with `layers['reconstructed_counts']` when recoverable |
 | HVG | 3000, Scanpy default flavor (`seurat`) on log data | 3000, `seurat`, on log data (`auto`: only when genes > 3000) |
-| scaling | scaled HVG working copy, clip 10; `X` untouched | same |
+| scaling | scaled HVG working copy, clip 10 (scanpy densifies the sparse block in float64); `X` untouched | same code path (bit-identical PCs, docs/reference/PARITY_RESULTS.md) |
 | PCA | 50 PCs, arpack, zero-centred | same (`rna.n_pcs: 50`) |
 | neighbors | 15 neighbours on PCA | same (`neighbors.n_neighbors: 15`) |
 | UMAP | `min_dist 0.5`, seed `run.seed = 0` | same (`umap.min_dist 0.5`, `spread 1.0`, `compute.seed 0`) |
-| clustering | Leiden 1.0 (used by enrichment / lochNESS stages) | **none** (no preprocessing/QC purpose in this phase) |
+| clustering | Leiden 1.0 (igraph, 2 iterations, seed) before every analysis | same, as the first analysis stage (`analysis.clustering`) |
+| perturbation strength | target's own expression vs ntc / other controls, KS + MWU, BH, hit call | same (`analysis.perturbation_effects.strength`) |
+| cluster enrichment | Fisher / CMH per target x cluster, both arms, primary `other` | same |
+| modules / programs | Leiden-marker panel, log2FC vs ntc (pseudocount 1e-9), Pearson/Spearman clustering, score_genes | same |
+| PS | pertps score, quadrants, LDA embedding | same maths re-implemented (no `pertps` dependency), same order / skipping / LDA |
+| lochNESS | k = 300 in `X_pca`, no null | same; permutation null and control delta are optional extras |
 | batch correction | optional Harmony | none (SCP1064 has no batch labels) |
 | protein representation | – | CLR (per protein across cells) of raw counts, targeting antibodies only, scaled, 10 PCs, 15 neighbours, UMAP |
 | joint representation | – | optional `concat_pcs`, off by default (see below) |
@@ -70,7 +75,7 @@ vs dominant-call agreement; disagreements are a warning, never a silent fix.
 |---|---|---|
 | `rna.input_state` | `auto` | integer values → raw counts; constant `sum(expm1(x))` per cell → log-normalized. SCP1064 detects as ln(TPM+1) with scale 1e6. |
 | `rna.normalize` | `auto` | normalize only raw counts; log-normalized input is preserved (never normalized twice). `always` is refused on non-raw input. |
-| `rna.target_sum` | 10000 | Scanpy convention for raw-count input (Wei Li uses the median library size, `null`); irrelevant for SCP1064. |
+| `rna.target_sum` | `null` | median library size, the reference `cluster.target_sum: null`; `10000` is the Scanpy convention (the SCP1064 configs set it explicitly; irrelevant there because the input is log-normalized). |
 | `rna.log1p` | true | standard. |
 | `rna.reconstruct_counts` | `auto` | when a per-cell library size is available, integer counts are recovered as `round(expm1(x) * total / scale)` and accepted only if all entries are within `reconstruct_tolerance` of integers. Stored as `layers['reconstructed_counts']`, never as `counts`. |
 | `rna.hvg.enabled` / `n_top_genes` / `flavor` | `auto` / 3000 / `seurat` | Wei Li `cluster.n_top_genes: 3000` with Scanpy's default dispersion-based flavor, which expects log-normalized data and therefore works on both raw-derived and provided ln(TPM+1) values. `seurat_v3` (needs counts) is available. |
@@ -138,7 +143,9 @@ before-filter figures exist so that this review is possible).
 |---|---|---|---|
 | **prefilter** (permissive) | `qc.prefilter.enabled`, `min_genes_per_cell`, `min_cells_per_gene` | true, 200, 3 | Wei Li `qc.min_genes_per_cell` / `min_cells_per_gene`; removes obvious empty droplets and never-detected genes *before* metrics so that the QC figures show real cells. Recorded as `prefilter_*` audit steps. |
 | **strict filtering** | `qc.filter.enabled` | true | configured cell removal, after the before-filter figures; every step is an audit row (`rna_*`, `protein_*`, `perturbation_*`). |
-| | `qc.filter.rna.min_genes` | 500 | between Wei Li's `min_genes_final: 1000` (deep ESC data) and the prefilter; conservative for most 10x data. |
+| | `qc.filter.rna.min_genes` | 1000 | reference `qc.min_genes_final: 1000`. |
+| | `qc.filter.rna.max_pct_mt` / `max_pct_hb` | 20 / null | reference: keep `pct_counts_mt < 20` (strict), optional haemoglobin cut. |
+| | `qc.filter.rna.min_cells_per_gene` | 3 | reference re-applies `filter_genes(min_cells=3)` after the cell filters, so genes that lost their last cells leave the matrix (affects HVG/PCA). |
 | | `qc.filter.rna.min_counts` | null | off unless a dataset needs it. |
 | | `qc.filter.rna.max_pct_mt` | 20 | Wei Li `qc.max_pct_mt`. |
 | | `qc.filter.protein.*` | all null / false | protein thresholds are dataset-specific (panel size, depth); shipped off, available: `min_total_counts`, `min_proteins_detected`, `max_pct_isotype`, `remove_extreme_counts`. |
@@ -174,36 +181,47 @@ dataset-specific regression settings, not the public defaults.
 Flags are applied per guide, per target and per (guide, condition) /
 (target, condition) pair; nothing is removed.
 
-## Clustering
+## Perturbation analyses (`analysis.perturbation_effects`; on by default)
 
-Not included. Leiden clustering in the Wei Li pipeline serves downstream
-stages (cluster enrichment, lochNESS). It has no preprocessing or QC role in
-this pipeline, adds `leidenalg`/`igraph` dependencies and a resolution
-parameter with no principled default, so it is left to the analysis phase.
-
-## Perturbation effects (`analysis.perturbation_effects`, Stage E; off by default)
+The reference Perturb-seq analyses run in the reference order once the representations exist:
+Leiden clustering → **perturbation strength** → perturbation × cluster enrichment → **modules /
+programs** → **PS** → **lochNESS**, then the protein extension (protein effects, RNA–protein
+concordance). Every default below is the reference value unless marked *extension*
+(docs/reference/REFERENCE_PIPELINE_COMPLETE_AUDIT.md, numerical parity in
+docs/reference/PARITY_RESULTS.md).
 
 | key | default | rationale |
 |---|---|---|
-| `enabled` | `false` | downstream biology is opt-in; preprocessing runs are unchanged without it |
-| `control_classes` | `[non_targeting]` | controls = single-guide cells of these control classes; ambiguous / multi-guide cells are never used |
-| `target_gene_map` | `{}` | target label → RNA gene symbol where they differ (dataset config only) |
-| `ps.top_n_genes` / `scale_factor` / `ps_threshold` | 100 / 3.0 / 0.5 | PS_python (`pertps`) and reference pipeline defaults |
-| `ps.expression_cut` | `mean` | reference pipeline: the control median is degenerate (0) for most genes |
-| `ps.min_cells_per_target` / `min_control_cells` / `min_pct_expressing_control` | 10 / 10 / 1 % | reference defaults |
-| `lochness.n_neighbors` / `n_pcs` | 300 / 20 | pertTF / reference defaults, neighbours in `X_pca` |
-| `lochness.max_k_fraction` | 0.1 | caps k at 10 % of the cells so small objects keep a local neighbourhood (added; recorded when applied) |
-| `lochness.n_permutations` | 200 | label-permutation null (added, following Huang et al. 2023) |
-| `modules.min_cells_per_perturbation` / `min_perturbations` / `min_genes` | 20 / 5 / 10 | reference defaults |
+| `enabled` | `true` | the reference runs every analysis by default; `false` gives a preprocessing-only run |
+| `control_classes` | `[non_targeting]` | the `ntc` arm = single-guide cells of these control classes; ambiguous / multi-guide cells are never used |
+| `target_gene_map` | `{}` | target label → RNA gene symbol where they differ (dataset config only; the reference assumes label = symbol) |
+| `strength.controls` / `primary_control` | `[ntc, other]` / `ntc` | reference: both arms reported, `ntc` drives ranking and the effective-knockdown call |
+| `strength.min_cells_per_target` / `min_control_cells` / `min_pct_expressing_control` | 10 / 10 / 1 % | reference |
+| `strength.fdr_alpha` / `max_log2fc_for_hit` | 0.05 / 0 | hit = KS BH-FDR < α **and** log2FC < 0 (reference) |
+| `strength.top_n_report` / `umap_background_fraction` | 12 / 0.1 | reference figure settings |
+| `ps.top_n_genes` / `scale_factor` / `ps_threshold` | 100 / 3.0 / 0.5 | PS_python (`pertps`) and reference defaults |
+| `ps.expression_cut` | `mean` | reference: the control median is degenerate (0) for most genes |
+| `ps.min_cells_per_target` / `min_control_cells` / `min_pct_expressing_control` | 10 / 10 / 1 % | reference |
+| `ps.score_targets_without_gene` | `false` | reference skips targets whose gene is not in `var`; `true` scores them with `not_applicable` quadrants (*extension*) |
+| `ps.compute_lda_umap` / `lda_n_pcs` / `lda_max_genes` / `lda_highlight_threshold` | true / 40 / 5000 / 0.8 | reference supervised LDA embedding (PS_python `compute_lda_umap`) |
+| `lochness.n_neighbors` / `n_pcs` | 300 / 20 | pertTF / reference defaults, neighbours in `X_pca` (`X_pca_harmony` when present) |
+| `lochness.max_k_fraction` | 1.0 | reference: k = min(300, n − 1); a value < 1 caps k on small objects (*extension*, recorded when applied) |
+| `lochness.n_permutations` | 0 | reference has no null; > 0 adds a seeded label-permutation z / p / FDR (*extension*) |
+| `lochness.noise_delta` | 0 | reference option (pertTF adds 1e-4 for model training) |
+| `modules.gene_selection` | `cluster_markers` | reference panel: union of the top 100 positive Wilcoxon markers of each Leiden cluster; `response` (top response genes per target) and `hvg` are options |
+| `modules.cluster_key` / `n_marker_genes_per_cluster` / `marker_method` | leiden / 100 / wilcoxon | reference |
+| `modules.control` | `ntc` | reference (falls back to `other`, the leave-one-target-out targeting cells, when no controls exist) |
+| `modules.min_cells_per_perturbation` / `min_perturbations` / `min_genes` | 20 / 5 / 10 | reference |
 | `modules.program_correlation` / `module_correlation` / `linkage_method` | pearson / spearman / average | reference |
 | `modules.n_programs` / `n_modules` / `cluster_distance_threshold` | 4 / 9 / 0.7 | reference |
-| `modules.gene_selection` | `response` | union of each target's top 100 response genes at FDR < 0.05 (the reference uses Leiden markers; this pipeline has no clustering) |
-| `modules.log2fc_pseudocount` | 1.0 | Seurat `FoldChange` convention; the reference 1e-9 gives |log2FC| > 20 for genes undetected in a small group |
-| `modules.min_pct_cells_expressing` | 5 % | panel genes detected in ≥ 5 % of analysed cells (added, same reason) |
-| `modules.de_lfc_threshold` / `de_fdr_alpha` | 0.5 / 0.05 | reference DE gate |
-| `protein.representation` | `protein` | the primary normalized protein matrix (CLR of counts by default); never counts |
-| `protein.min_cells_per_target` / `min_control_cells` / `fdr_alpha` | 10 / 10 / 0.05 | same support rule as PS |
-| `concordance.min_cells` / `fdr_alpha` | 20 / 0.05 | minimum cells for a within-target Spearman correlation |
+| `modules.log2fc_pseudocount` | 1e-9 | reference; 1.0 (Seurat `FoldChange` convention) bounds log2FC for genes undetected in one group (*option*) |
+| `modules.min_pct_cells_expressing` | 0 | reference has no detection filter (*extension* when > 0) |
+| `modules.de_lfc_threshold` / `de_fdr_alpha` | 0.5 / 0.05 | reference DE gate (Welch t, BH within perturbation over the panel) |
+| `modules.program_scoring` / `score_programs` / `draw_networks` | score_genes / true / true | reference `sc.tl.score_genes` (ctrl_size 50, seeded) and the network graphs (needs networkx) |
+| `protein.representation` | `protein` | the primary normalized protein matrix (CLR of counts by default); never counts (*extension*) |
+| `protein.min_cells_per_target` / `min_control_cells` / `fdr_alpha` | 10 / 10 / 0.05 | same support rule as PS (*extension*) |
+| `concordance.min_cells` / `fdr_alpha` | 20 / 0.05 | minimum cells for a within-target Spearman correlation (*extension*) |
+| `top_n_report` | 12 | targets whose per-target figures are embedded in the report (all are written to disk) |
 
 ## Cell states and perturbation × cluster enrichment (`analysis.clustering`; on by default)
 
@@ -211,15 +229,15 @@ parameter with no principled default, so it is left to the analysis phase.
 |---|---|---|
 | `enabled` | `true` | part of the standard run; `false` skips clustering and enrichment (the SCP1064 regression configs do, so that the frozen v0.1 reference stays comparable) |
 | `key` | `leiden` | obs column for the labels; an existing column is an error unless `overwrite: true` |
-| `resolution` | 1.0 | reference (weili-lab/perturbseq-pipeline) default; results are conditional on it |
-| `n_iterations` | 2 | reference; `-1` iterates until convergence |
+| `resolution` | 1.0 | reference default; results are conditional on it |
+| `n_iterations` | 2 | reference (igraph flavour, undirected, seeded); `-1` iterates until convergence |
 | `neighbors_key` | `rna` | the RNA neighbour graph of the representation stage (no second preprocessing) |
-| `enrichment.control` | `non_targeting` | same control rule as every perturbation analysis; `other` (all other targets) is the reference default, available explicitly |
-| `enrichment.control_classes` | `[non_targeting]` | control classes counted as controls |
-| `enrichment.min_cells_per_target` / `min_cells_per_cluster` / `min_control_cells` | 10 / 20 / 10 | reference |
-| `enrichment.min_control_cells_in_cluster` | 10 | reference `min_reference_cells` (low-power flag) |
-| `enrichment.min_cells_per_guide` | 5 | reference guide-concordance minimum |
-| `enrichment.odds_pseudocount` | 0.5 | Haldane-Anscombe, display/ranking only; the Fisher odds ratio is stored unchanged |
-| `enrichment.fdr_alpha` | 0.05 | BH over all tested (target, cluster) pairs of the run |
-| `enrichment.stratify_by` | null | any obs column; adds a CMH test beside Fisher (own BH family) |
-| `enrichment.n_permutations` | 1000 | omnibus permutation p-value (reference) |
+| `enrichment.controls` | `[ntc, other]` | reference: both arms computed and reported |
+| `enrichment.primary_control` | `other` | reference default: the arm that drives `significant`, the ranking and the figures (non-targeting cells are few in rare clusters) |
+| `enrichment.control_classes` | `[non_targeting]` | control classes forming the `ntc` arm |
+| `enrichment.min_cells_per_target` / `min_cells_per_cluster` / `min_reference_cells` | 10 / 20 / 10 | reference (an arm needs ≥ 10 cells in total; pairs with < 10 reference cells in the cluster are `low_power`) |
+| `enrichment.min_cells_per_guide` / `guide_concordance` | 5 / true | reference guide-concordance rule, significant pairs only |
+| `enrichment.odds_pseudocount` | 0.5 | Haldane-Anscombe odds ratio (reference); the uncorrected sample odds ratio is kept as `sample_odds_ratio` |
+| `enrichment.fdr_alpha` | 0.05 | BH within each control arm (reference) |
+| `enrichment.stratify_by` | null | any obs column with ≥ 2 levels: CMH across its levels replaces the pooled Fisher p-value (reference); `pval_fisher` is kept |
+| `enrichment.n_permutations` | 1000 | omnibus permutation p-value: every target's row resampled from a multinomial with the pooled cluster proportions (reference) |

@@ -50,6 +50,32 @@ ADD/NOTE must be explainable by the change being tested.
 | compare vs v0.1 | 67 slots, 0 DIFF, 1 ADD, 1 NOTE | 67 slots, 0 DIFF, 1 ADD, 1 NOTE |
 | run | 78 s, 6 warnings | job 20846621: 24 min, 23.5 GB peak, 7 warnings |
 
+## Reference-parity corrections (2026-09-26) and the v0.1 baseline
+
+The corrections that make the RNA analyses reproduce `weili-lab/perturbseq-pipeline`
+(docs/reference/PARITY_RESULTS.md) change three things that the v0.1 baseline comparison
+reports as DIFF or ADD and that are **intentional**:
+
+* `obsm['X_pca']` / `obsm['X_umap_rna']`: the RNA PCA scales the sparse HVG block on the
+  reference code path (scanpy densifies it in float64 before `sc.tl.pca`) instead of a
+  float32 dense copy. PCs move by ~1e-3 (v0.1 smoke: max|diff| 7e-4), which is exactly the
+  difference that made the Leiden partition diverge from the reference; the reference PCs
+  are now reproduced to 1e-8. The UMAP moves accordingly.
+* `obsm['X_pca_protein']` / `obsm['X_umap_protein']`: the protein PCA now follows the same
+  numerical principle. The CLR block (float32 in `obsm['protein']`, unchanged) is cast to an
+  explicit float64 working matrix, scaled and decomposed by arpack in float64, and the
+  coordinates / loadings are stored as float32 (a deterministic cast; the h5ad size is
+  unchanged). Against v0.1 the protein PCs differ at the ~1e-5 level (float32 arpack in
+  v0.1); repeat runs of the new implementation are bit-identical, including the protein
+  UMAP. Protein counts, the CLR formula and axis, isotype handling, feature exclusion and
+  every protein-effect / concordance statistic are untouched.
+* `obs['pct_counts_hb']`, `obs['total_counts_hb']`, `var['hb']`: the reference
+  haemoglobin gene class (whitelisted as additive slots in `compare_processed.py`).
+
+Everything else in the regression objects is unchanged (`X`, counts, QC metrics, protein
+CLR, guide slots). The v0.1 baselines stay frozen; a new baseline version
+(`results/baselines/v0.2/`) can be frozen from the next validated SCP1064 run.
+
 ## Stage record
 
 | stage | content | validation |

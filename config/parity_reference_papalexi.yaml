@@ -1,0 +1,53 @@
+# Run with the REFERENCE pipeline (conda env perturbseq-pipeline): replace ${RESULTS_ROOT} / ${REPO_ROOT}
+# with absolute paths (the reference config has no placeholders), then
+#   perturbseq-pipeline run --config <this file>
+# Reference perturbseq-pipeline run on the bundled Papalexi 1,800-cell demo subset (parity baseline).
+run:
+  name: papalexi_reference
+  outdir: ${RESULTS_ROOT}/parity/reference_papalexi
+  seed: 0
+input:
+  mode: mtx
+  mtx_dirs:
+    papalexi: ${REPO_ROOT}/demo/data/papalexi_eccite/filtered_feature_bc_matrix
+  guide_feature_types: ["CRISPR Guide Capture"]
+  var_names: gene_symbols
+  cache_mtx: false
+guides:
+  min_umi: 3
+  dominance_ratio: 2.0
+  detection_threshold: 3
+  target_regex: "^(.+?)g\\d+$"
+  ntc_patterns: ["^NT$"]
+qc:
+  min_genes_per_cell: 200
+  min_cells_per_gene: 3
+  min_genes_final: 1000
+  max_pct_mt: 20.0
+cluster:
+  n_top_genes: 3000
+  n_pcs: 50
+  n_neighbors: 15
+  leiden_resolution: 1.0
+perturbation:
+  controls: ["ntc", "other"]
+  primary_control: ntc
+enrichment:
+  enabled: true
+  primary_control: other
+  permutations: 1000
+modules:
+  enabled: true
+ps_score:
+  enabled: true
+  compute_lda_umap: true
+lochness:
+  enabled: true
+report:
+  title: "Reference perturbseq-pipeline on the Papalexi demo subset"
+output:
+  h5ad_name: reference_processed.h5ad
+  archive: false
+  write_guide_table: false
+  large_file_dir: null
+  large_file_threshold_mb: 100000

@@ -345,8 +345,9 @@ class RNAConfig:
     #: ``auto``: normalize only raw counts; ``never``: keep values as-is;
     #: ``always``: normalize_total+log1p (refused on already-normalized input).
     normalize: str = "auto"
-    #: Library-size target for raw-count input (Scanpy convention; Wei Li uses the median library size = null).
-    target_sum: Optional[float] = 1.0e4
+    #: Library-size target for raw-count input. ``null`` = the median library size
+    #: (reference perturbseq-pipeline ``cluster.target_sum: null``); ``1.0e4`` is the Scanpy convention.
+    target_sum: Optional[float] = None
     log1p: bool = True
     #: Reconstruct integer counts from log-normalized values when
     #: ``columns.rna_total_counts`` is available: ``auto`` | ``never``.
@@ -356,6 +357,8 @@ class RNAConfig:
     reconstruct_tolerance: float = 0.05
     mito_prefix: str = "MT-"
     ribo_prefixes: List[str] = field(default_factory=lambda: ["RPS", "RPL"])
+    #: Regex flagging haemoglobin genes (reference ``qc.hb_pattern``); gives ``var['hb']`` / ``obs['pct_counts_hb']``.
+    hb_pattern: str = "^HB[^(P)]"
     hvg: HVGConfig = field(default_factory=HVGConfig)
     #: Scale the HVG matrix (zero-centre, unit variance, clipped) before PCA, as
     #: in the Wei Li pipeline (cluster.scale_max_value: 10). ``X`` is never scaled.
@@ -461,10 +464,17 @@ class PrefilterConfig:
 
 @dataclass
 class RNAFilterConfig:
-    #: Strict cell thresholds (public defaults; see docs/DEFAULTS.md). ``null`` disables a step.
-    min_genes: Optional[int] = 500
+    #: Strict thresholds, applied in this order, exactly as the reference
+    #: ``qc.filter_cells_and_genes``: genes detected >= ``min_genes`` (reference
+    #: ``min_genes_final`` 1000); total counts >= ``min_counts``; % mitochondrial
+    #: strictly below ``max_pct_mt``; % haemoglobin strictly below ``max_pct_hb``;
+    #: then genes detected in >= ``min_cells_per_gene`` of the retained cells
+    #: (the reference re-applies its gene filter after the cell filters). ``null`` disables a step.
+    min_genes: Optional[int] = 1000
     min_counts: Optional[int] = None
     max_pct_mt: Optional[float] = 20.0
+    max_pct_hb: Optional[float] = None
+    min_cells_per_gene: Optional[int] = 3
 
 
 @dataclass
@@ -564,6 +574,18 @@ class PSAnalysisConfig:
     min_control_cells: int = 10
     #: skip targets expressed in fewer than this % of control cells (knockdown unmeasurable)
     min_pct_expressing_control: float = 1.0
+    #: reference behaviour: a target whose gene symbol is not in ``var`` (after
+    #: ``target_gene_map``) is skipped. ``true`` scores it anyway (quadrants ``not_applicable``).
+    score_targets_without_gene: bool = False
+    #: supervised LDA embedding of the perturbations (PS_python ``compute_lda_umap``):
+    #: HVG 2000 -> scale -> PCA ``lda_n_pcs`` -> LDA (eigen, shrinkage auto) on the
+    #: scored targets + controls -> UMAP (30 neighbours, min_dist 0.01, cosine, seed 42)
+    compute_lda_umap: bool = True
+    lda_n_pcs: int = 40
+    #: genes handed to the LDA step (the run's HVGs first); null = no cap
+    lda_max_genes: Optional[int] = 5000
+    #: own-target score at or above which a cell is a high-confidence responder on the LDA map
+    lda_highlight_threshold: float = 0.8
 
 
 @dataclass
@@ -574,16 +596,20 @@ class LochnessAnalysisConfig:
     enabled: bool = True
     #: k nearest neighbours in PCA space (reference: 300)
     n_neighbors: int = 300
-    #: cap k at this fraction of the cell count (small objects); the cap is recorded when it applies
-    max_k_fraction: float = 0.1
+    #: optional cap of k at this fraction of the cell count. 1.0 = no cap beyond
+    #: n - 1 (reference behaviour); e.g. 0.1 caps k on small objects (recorded when it applies)
+    max_k_fraction: float = 1.0
     n_pcs: int = 20
     #: obsm key for the neighbour space; null -> obsm['X_pca'] (never UMAP)
     use_rep: Optional[str] = None
     min_cells_per_target: int = 10
     #: score above which a cell counts as 'enriched' (pct_cells_enriched)
     enrichment_cut: float = 0.5
-    #: label-permutation null per target for the own-cell mean (0 disables)
-    n_permutations: int = 200
+    #: extension: seeded label-permutation null per target for the own-cell mean
+    #: (z-score, empirical p, BH-FDR). 0 = off (reference has no null)
+    n_permutations: int = 0
+    #: Gaussian noise added to the scores (pertTF uses 1e-4 for model training; reference default 0)
+    noise_delta: float = 0.0
 
 
 @dataclass
@@ -596,11 +622,21 @@ class ModulesAnalysisConfig:
     min_cells_per_perturbation: int = 20
     min_perturbations: int = 5
     min_genes: int = 10
-    #: gene panel: ``response`` = union of each perturbation's top response genes
-    #: (Welch t-test vs control, BH within perturbation); ``hvg`` = highly variable genes
-    gene_selection: str = "response"
+    #: gene panel: ``cluster_markers`` (reference) = union of the top
+    #: ``n_marker_genes_per_cluster`` positive markers of each Leiden cluster
+    #: (``rank_genes_groups``, ``marker_method``); ``response`` = union of each
+    #: perturbation's top response genes (Welch t-test vs control, BH within
+    #: perturbation); ``hvg`` = highly variable genes
+    gene_selection: str = "cluster_markers"
+    #: obs column of the cell-state clusters used by ``cluster_markers`` (falls back to HVGs when absent)
+    cluster_key: str = "leiden"
+    n_marker_genes_per_cluster: int = 100
+    marker_method: str = "wilcoxon"
     n_response_genes_per_perturbation: int = 100
     response_fdr: float = 0.05
+    #: control the effect is measured against: ``ntc`` (falls back to ``other`` when
+    #: there are no control cells) or ``other`` (leave-one-target-out targeting cells)
+    control: str = "ntc"
     #: correlation used to cluster genes (programs) and perturbations (modules)
     program_correlation: str = "pearson"
     module_correlation: str = "spearman"
@@ -609,17 +645,22 @@ class ModulesAnalysisConfig:
     n_programs: Optional[int] = 4
     n_modules: Optional[int] = 9
     cluster_distance_threshold: float = 0.7
-    #: pseudocount added to the de-logged group means before log2 (normalized-count
-    #: scale). 1.0 = Seurat FoldChange convention; the reference used 1e-9, which makes
-    #: log2FC unbounded for genes undetected in a small group
-    log2fc_pseudocount: float = 1.0
-    #: panel genes must be detected (> 0) in at least this % of perturbed + control cells
-    min_pct_cells_expressing: float = 5.0
+    #: pseudocount added to the de-logged group means before log2 (reference 1e-9;
+    #: 1.0 = Seurat FoldChange convention, which bounds log2FC for genes undetected in a group)
+    log2fc_pseudocount: float = 1e-9
+    #: optional extension: panel genes must be detected (> 0) in at least this % of
+    #: perturbed + control cells (reference: no detection filter = 0)
+    min_pct_cells_expressing: float = 0.0
     #: DE gate for 'responding' counts: |log2FC| > threshold and BH-FDR < alpha
     de_lfc_threshold: float = 0.5
     de_fdr_alpha: float = 0.05
-    #: per-cell program activity (mean z-scored expression of the program's genes)
+    #: per-cell program activity: ``score_genes`` (reference: ``sc.tl.score_genes``,
+    #: ctrl_size 50, seed ``compute.seed``) or ``zscore`` (mean z-scored expression)
     score_programs: bool = True
+    program_scoring: str = "score_genes"
+    #: draw the module-module and TF-hub network graphs (needs networkx; heatmaps are always drawn)
+    draw_networks: bool = True
+    top_n_report: int = 12
 
 
 @dataclass
@@ -646,19 +687,45 @@ class ConcordanceConfig:
 
 
 @dataclass
+class PerturbationStrengthConfig:
+    """Perturbation strength (reference ``perturbation.py``): for every target whose
+    gene is measured, the gene's own log-normalized expression in the target's
+    perturbed cells versus control cells, under two control definitions."""
+
+    enabled: bool = True
+    #: ``ntc`` = single-guide cells of ``perturbation_effects.control_classes``;
+    #: ``other`` = single-guide targeting cells of every other target
+    controls: List[str] = field(default_factory=lambda: ["ntc", "other"])
+    #: drives ranking, the effective-knockdown call and the representative figures
+    primary_control: str = "ntc"
+    min_cells_per_target: int = 10
+    min_control_cells: int = 10
+    #: targets whose gene is expressed in fewer than this % of primary-control cells are untestable
+    min_pct_expressing_control: float = 1.0
+    fdr_alpha: float = 0.05
+    #: effective knockdown = KS BH-FDR < alpha AND log2FC below this value
+    max_log2fc_for_hit: float = 0.0
+    #: targets whose per-target figures are embedded in the report (all are written to disk)
+    top_n_report: int = 12
+    #: fraction of background cells drawn in the per-target UMAP panel
+    umap_background_fraction: float = 0.1
+
+
+@dataclass
 class PerturbationEffectsConfig:
     """Stage E: downstream perturbation-effect analyses on the processed object.
-    Off by default; the sub-analyses run when this block is enabled (each can be
-    switched off individually). Controls are the ``single_control`` cells whose
-    control class is listed in ``control_classes``; perturbed cells are
-    ``single_targeting`` cells of one target. Ambiguous / multi-guide cells never
-    enter either group."""
+    On by default, as in the reference pipeline; the sub-analyses run when this
+    block is enabled (each can be switched off individually). Controls are the
+    ``single_control`` cells whose control class is listed in ``control_classes``;
+    perturbed cells are ``single_targeting`` cells of one target. Ambiguous /
+    multi-guide cells never enter either group."""
 
-    enabled: bool = False
+    enabled: bool = True
     control_classes: List[str] = field(default_factory=lambda: ["non_targeting"])
     #: target label -> gene symbol in var when they differ (e.g. PDL1 -> CD274);
     #: used for the PS expressed-in-controls guard and the knockdown quadrants
     target_gene_map: Dict[str, str] = field(default_factory=dict)
+    strength: PerturbationStrengthConfig = field(default_factory=PerturbationStrengthConfig)
     ps: PSAnalysisConfig = field(default_factory=PSAnalysisConfig)
     lochness: LochnessAnalysisConfig = field(default_factory=LochnessAnalysisConfig)
     modules: ModulesAnalysisConfig = field(default_factory=ModulesAnalysisConfig)
@@ -673,24 +740,29 @@ class ClusterEnrichmentConfig:
     """Perturbation x cluster enrichment (``analysis/cluster_enrichment.py``)."""
 
     enabled: bool = True
-    #: ``non_targeting``: single-guide cells of ``control_classes`` (default);
-    #: ``other``: single-guide targeting cells of every other target (explicit
-    #: alternative, the default of weili-lab/perturbseq-pipeline)
-    control: str = "non_targeting"
+    #: reference arms, both computed and reported: ``ntc`` = single-guide cells of
+    #: ``control_classes``; ``other`` = single-guide targeting cells of every other target
+    controls: List[str] = field(default_factory=lambda: ["ntc", "other"])
+    #: arm that drives significance calls, ranking and the figures (reference default
+    #: ``other``: the non-targeting group is small and contributes few cells to rare clusters)
+    primary_control: str = "other"
     control_classes: List[str] = field(default_factory=lambda: ["non_targeting"])
     min_cells_per_target: int = 10
     #: clusters smaller than this are not tested
     min_cells_per_cluster: int = 20
-    min_control_cells: int = 10
-    #: pairs with fewer control cells in the cluster are flagged ``low_power``
-    min_control_cells_in_cluster: int = 10
+    #: an arm needs at least this many cells in total; pairs with fewer reference
+    #: cells in the cluster are flagged ``low_power`` (reference ``min_reference_cells``)
+    min_reference_cells: int = 10
     #: guides with at least this many cells enter the guide-support count
     min_cells_per_guide: int = 5
     #: Haldane-Anscombe pseudocount for the finite log2 odds ratio (display/ranking only)
     odds_pseudocount: float = 0.5
     fdr_alpha: float = 0.05
-    #: optional obs column (e.g. sample, lane): adds a Cochran-Mantel-Haenszel test across its levels
+    #: optional obs column (e.g. sample, lane): a Cochran-Mantel-Haenszel test across its
+    #: levels replaces the pooled Fisher test (reference); the Fisher p-value is kept beside it
     stratify_by: Optional[str] = None
+    #: report how many of a target's guides independently show each significant pair
+    guide_concordance: bool = True
     #: label permutations for the omnibus target x cluster chi-square (0 disables)
     n_permutations: int = 1000
     top_n_report: int = 12
@@ -905,9 +977,27 @@ class Config:
                 errs.append(f"{k} must be >= 1")
         if self.multimodal.protein_weight < 0:
             errs.append("multimodal.protein_weight must be >= 0")
+        fr = self.qc.filter.rna
+        if fr.min_cells_per_gene is not None and fr.min_cells_per_gene < 0:
+            errs.append("qc.filter.rna.min_cells_per_gene must be >= 0 or null")
+        if fr.max_pct_hb is not None and not 0 <= fr.max_pct_hb <= 100:
+            errs.append("qc.filter.rna.max_pct_hb must be in [0, 100] or null")
         pe = self.analysis.perturbation_effects
         _choice(errs, "analysis.perturbation_effects.ps.expression_cut", pe.ps.expression_cut, ("mean", "median", "quantile"))
-        _choice(errs, "analysis.perturbation_effects.modules.gene_selection", pe.modules.gene_selection, ("response", "hvg"))
+        _choice(errs, "analysis.perturbation_effects.modules.gene_selection", pe.modules.gene_selection, ("cluster_markers", "response", "hvg"))
+        _choice(errs, "analysis.perturbation_effects.modules.control", pe.modules.control, ("ntc", "other"))
+        _choice(errs, "analysis.perturbation_effects.modules.program_scoring", pe.modules.program_scoring, ("score_genes", "zscore"))
+        _choice(errs, "analysis.perturbation_effects.modules.marker_method", pe.modules.marker_method, ("wilcoxon", "t-test", "t-test_overestim_var", "logreg"))
+        st = pe.strength
+        bad = set(st.controls) - {"ntc", "other"}
+        if bad or not st.controls:
+            errs.append("analysis.perturbation_effects.strength.controls must be a non-empty subset of ['ntc', 'other']")
+        if st.primary_control not in st.controls:
+            errs.append("analysis.perturbation_effects.strength.primary_control must be one of strength.controls")
+        if not 0 < st.fdr_alpha < 1 or not 0 < st.umap_background_fraction <= 1:
+            errs.append("analysis.perturbation_effects.strength: 0 < fdr_alpha < 1 and 0 < umap_background_fraction <= 1 are required")
+        if st.min_cells_per_target < 1 or st.min_control_cells < 1:
+            errs.append("analysis.perturbation_effects.strength.min_cells_per_target / min_control_cells must be >= 1")
         for k, v in (("modules.program_correlation", pe.modules.program_correlation), ("modules.module_correlation", pe.modules.module_correlation)):
             _choice(errs, f"analysis.perturbation_effects.{k}", v, ("pearson", "spearman"))
         _choice(errs, "analysis.perturbation_effects.modules.linkage_method", pe.modules.linkage_method, ("average", "complete", "single", "ward"))
@@ -918,6 +1008,10 @@ class Config:
             errs.append("analysis.perturbation_effects.ps.scale_factor must be > 0")
         if not 0 < pe.lochness.max_k_fraction <= 1:
             errs.append("analysis.perturbation_effects.lochness.max_k_fraction must be in (0, 1]")
+        if pe.lochness.n_permutations < 0 or pe.lochness.noise_delta < 0:
+            errs.append("analysis.perturbation_effects.lochness.n_permutations and noise_delta must be >= 0")
+        if pe.ps.lda_n_pcs < 2 or (pe.ps.lda_max_genes is not None and pe.ps.lda_max_genes < 10):
+            errs.append("analysis.perturbation_effects.ps.lda_n_pcs must be >= 2 and lda_max_genes >= 10 or null")
         if not pe.control_classes:
             errs.append("analysis.perturbation_effects.control_classes must name at least one control class")
         cl = self.analysis.clustering
@@ -928,10 +1022,14 @@ class Config:
         if not str(cl.key).strip():
             errs.append("analysis.clustering.key must be a non-empty obs column name")
         ce = cl.enrichment
-        _choice(errs, "analysis.clustering.enrichment.control", ce.control, ("non_targeting", "other"))
-        if ce.control == "non_targeting" and not ce.control_classes:
+        bad = set(ce.controls) - {"ntc", "other"}
+        if bad or not ce.controls:
+            errs.append("analysis.clustering.enrichment.controls must be a non-empty subset of ['ntc', 'other']")
+        if ce.primary_control not in ce.controls:
+            errs.append("analysis.clustering.enrichment.primary_control must be one of enrichment.controls")
+        if "ntc" in ce.controls and not ce.control_classes:
             errs.append("analysis.clustering.enrichment.control_classes must name at least one control class")
-        for k, v in (("min_cells_per_target", ce.min_cells_per_target), ("min_cells_per_cluster", ce.min_cells_per_cluster), ("min_control_cells", ce.min_control_cells), ("min_cells_per_guide", ce.min_cells_per_guide)):
+        for k, v in (("min_cells_per_target", ce.min_cells_per_target), ("min_cells_per_cluster", ce.min_cells_per_cluster), ("min_reference_cells", ce.min_reference_cells), ("min_cells_per_guide", ce.min_cells_per_guide)):
             if v < 1:
                 errs.append(f"analysis.clustering.enrichment.{k} must be >= 1")
         if ce.odds_pseudocount < 0 or not 0 < ce.fdr_alpha < 1 or ce.n_permutations < 0:

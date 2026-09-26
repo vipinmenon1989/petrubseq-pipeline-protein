@@ -1,0 +1,204 @@
+# SCIENTIFIC ANALYSIS CONFIG (not the regression benchmark): full SCP1064 with the
+# standard QC defaults and the complete analysis. Dataset facts as in config/scp1064.yaml.
+run:
+  name: SCP1064_analysis
+
+dataset:
+  name: SCP1064
+  input_dir: ${DATA_ROOT}/SCP1064          # ${DATA_ROOT} = $PETRUBSEQ_DATA_ROOT or <repo>/../data
+  description: >
+    Multi-modal pooled Perturb-CITE-seq screens in patient models define
+    mechanisms of cancer immune evasion (Nat Genet 2021). Single Cell Portal
+    download; RNA is ln(TPM+1), protein ships as raw ADT counts plus the
+    authors' isotype-normalized values.
+
+inputs:
+  rna:
+    # Genes x cells chunks that partition the 218,331 cells (identical values to
+    # other/RNA_expression.csv.gz); chunks are parsed in parallel. Values: ln(TPM+1).
+    files:
+      - expression/RNA_expression_subset1a.csv.gz
+      - expression/RNA_expression_subset1b_alpha.csv.gz
+      - expression/RNA_expression_subset1b_beta.csv.gz
+      - expression/RNA_expression_subset2.csv.gz
+      - expression/RNA_expression_subset3.csv.gz
+      - expression/RNA_expression_subset4.csv.gz
+    format: dense_csv
+    orientation: features_x_cells
+    state: auto            # detected: log_normalized (scale 1e6)
+    required: true
+  protein:
+    # Authors' normalized protein matrix: 20 antibodies, max(0, ln((count+1)/(isotype+1))).
+    file: documentation/Protein_expression.csv.gz
+    orientation: features_x_cells
+    state: normalized
+    required: true
+  protein_counts:
+    # Raw ADT UMI counts: 24 antibodies (20 targets + 4 isotype controls); 3 cells missing.
+    file: other/raw_CITE_expression.csv.gz
+    orientation: features_x_cells
+    state: raw_counts
+    required: false         # cells without raw counts are kept (NaN counts, has_protein_counts=False)
+  metadata:
+    file: metadata/RNA_metadata.csv
+    format: scp_metadata    # second line is the SCP TYPE row
+  guide_assignments:
+    file: documentation/all_sgRNA_assignments.txt
+    cell_column: Cell
+    guides_column: sgRNAs
+    list_separator: ","
+  embedding:
+    file: cluster/5fd0e449771a5b0db7207711/RNA_UMAP_cluster.csv   # authors' RNA UMAP, kept for comparison
+    format: scp_cluster
+    key: X_umap_provided
+    columns: [X, Y]
+
+columns:
+  cell_id: NAME
+  condition: condition             # Control / IFNγ / Co-culture
+  guide: sgRNA                     # populated for MOI == 1 cells only (cross-checked against guide_assignments)
+  moi: MOI
+  rna_total_counts: UMI_count      # enables exact reconstruction of integer counts
+  perturbation: null               # derived from guide assignments
+  target: null                     # derived from guide name (GENE_<n>)
+  sample: null                     # not provided in the SCP1064 download
+  donor: null                      # single patient model
+  batch: null                      # not provided
+  replicate: null
+  lane: null
+  keep: [library_preparation_protocol]
+
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)_(?P<index>\\d+)$"
+  control_classes:
+    non_targeting: ["^NO_SITE$"]              # NO_SITE_<n>: non-targeting guides
+    intergenic: ["^ONE_NON-GENE_SITE$"]       # ONE_NON-GENE_SITE_<n>: cutting controls at non-genic sites
+  min_cells_per_guide: 10          # coverage *flags* only (Wei Li: min_cells_per_target = 10)
+  min_cells_per_target: 10
+  preserve_multiguide: true        # 31 % of cells carry >= 2 guides: kept and labelled
+  preserve_unassigned: true        # 10.5 % of cells carry no guide: kept and labelled
+  multi_guide_label: multi
+  unassigned_label: unassigned
+
+alignment:
+  policy: intersection
+  required: [rna, protein, metadata]
+  fail_on_duplicates: true
+  min_overlap_fraction: 0.99
+
+rna:
+  input_state: auto        # detected log_normalized -> X preserved, never re-normalized
+  normalize: auto
+  target_sum: 10000        # used only for raw-count inputs
+  log1p: true
+  reconstruct_counts: auto # layers['reconstructed_counts'] = round(expm1(X) * UMI_count / 1e6), validated
+  reconstruct_tolerance: 0.05
+  mito_prefix: "MT-"
+  ribo_prefixes: [RPS, RPL]
+  hvg:
+    enabled: auto          # 23,712 genes > n_top_genes -> HVG selection on
+    n_top_genes: 3000      # Wei Li default
+    flavor: seurat         # dispersion-based on log data (Wei Li / Scanpy default)
+    batch_key: null
+  scale: true              # scaled HVG copy for PCA only (Wei Li scale_max_value 10); X is untouched
+  scale_max_value: 10.0
+  n_pcs: 50               # Wei Li / Scanpy default
+
+protein:
+  normalization: auto            # provided isotype-ratio matrix kept as obsm['protein']
+  extra_representations: [clr]   # obsm['protein_clr'] from raw counts
+  embedding_representation: auto # -> clr (raw counts available); provided values remain selectable
+  clr_axis: cells                # per-protein CLR across cells (Seurat margin=2; small panels)
+  isotype_patterns: ["IgG"]
+  exclude_isotypes_from_embedding: true
+  use_isotypes_for_qc: true
+  strip_feature_suffix: " protein"   # "CD117 protein" -> "CD117" (matches raw-count names)
+  scale: true
+  scale_max_value: 10.0
+  n_pcs: 10                      # 20 targeting antibodies -> 10 PCs (~80 % of variance)
+
+neighbors:
+  n_neighbors: 15                # Wei Li / Scanpy default
+  n_pcs: null                    # all rna.n_pcs
+
+umap:
+  enabled: true
+  min_dist: 0.5                  # Wei Li default
+  spread: 1.0
+  min_features: 5
+  color_by: [condition, perturbation_class]
+
+multimodal:
+  enabled: false                 # evaluated on SCP1064: protein graph is ADT-depth driven and shares
+  method: concat_pcs             # ~2 % of neighbours with RNA; joint space dilutes RNA structure
+  protein_weight: 1.0
+  umap: true
+  diagnostic_cells: 20000        # RNA-vs-protein agreement diagnostic is always computed
+
+qc:
+  # Standard public defaults (docs/DEFAULTS.md). The regression config disables both
+  # stages to reproduce the frozen v0.1 object; this scientific run applies them.
+  prefilter:
+    enabled: true
+    min_genes_per_cell: 200
+    min_cells_per_gene: 3
+  filter:
+    enabled: true
+    rna:
+      min_genes: 500
+      min_counts: null
+      max_pct_mt: 20.0
+    protein:
+      min_total_counts: null
+      min_proteins_detected: null
+      max_pct_isotype: null
+      remove_extreme_counts: false
+    perturbation:
+      cells: all
+  flags:
+    rna_n_mads: 5.0
+    protein_n_mads: 5.0
+    extreme_fold: 10.0
+    background_min_fraction_above_isotype: 0.5
+
+report:
+  title: null                # default: "<run name> - Perturb-CITE-seq preprocessing report"
+  embed_figures: true        # self-contained report.html; figures are also written to figures/
+  write_markdown: true
+  figure_format: png
+  figure_dpi: 120
+  max_table_rows: 100
+
+compute:
+  n_jobs: 8
+  chunk_rows: 500
+  seed: 0                  # PCA / neighbors / UMAP random_state
+  max_cells: null
+
+output:
+  dir: ${RESULTS_ROOT}/analysis/SCP1064     # scientific run; results/SCP1064 stays the validated regression output
+  h5ad_name: scp1064_processed.h5ad
+  compression: gzip
+  write_h5ad: true
+  write_prefilter_h5ad: false   # before-filter figures + tables/cell_qc_prefilter.csv.gz cover this without a second object
+  archive: false                # true -> <run>_results.tar.gz (report, figures, tables, logs; matrices excluded)
+
+analysis:
+  # Complete standard analysis (clustering on by default; effects enabled here).
+  clustering:
+    enabled: true
+    resolution: 1.0
+    enrichment:
+      controls: [ntc, other]            # both reference arms; ntc = NO_SITE guides (ONE_NON-GENE_SITE cells are single_control but not in the ntc arm)
+      primary_control: other            # reference default
+      stratify_by: condition            # Control / IFNg / Co-culture
+      n_permutations: 1000
+  perturbation_effects:
+    enabled: true
+    control_classes: [non_targeting]
+    lochness:
+      n_neighbors: 300
+      n_permutations: 50               # 218k cells x 248 targets: 50 label permutations keep the null tractable
+    modules:
+      n_programs: 4
+      n_modules: 9

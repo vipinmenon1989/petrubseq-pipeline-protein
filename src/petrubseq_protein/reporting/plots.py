@@ -287,18 +287,55 @@ def perturbation_qc_figures(obs: pd.DataFrame, pc: pd.DataFrame, gc: pd.DataFram
     reg.save(_coverage_hist(gc, tc), "coverage_histograms", S, st, "Guide and target coverage", "Single-guide cells per targeting guide and per targeting target; dashed lines are the low-coverage flag thresholds (nothing is removed).")
     if cond_target is not None:
         reg.save(_condition_heatmap(cond_target), "condition_target_coverage", S, st, "Condition x target coverage", "Single-guide cells per target and condition (log10); x marks pairs below the coverage threshold.")
+    # reference target_representation: cells per target (controls green), min_cells_per_target line
+    if "target" in obs.columns and "perturbation_class" in obs.columns:
+        single = obs[obs["perturbation_class"].astype(str).isin(["single_targeting", "single_control"])]
+        counts = single["target"].astype(str).value_counts()
+        if not counts.empty:
+            is_ctrl = single.groupby(single["target"].astype(str), observed=True)["perturbation_class"].first().astype(str).eq("single_control")
+            fig, ax = plt.subplots(figsize=(max(6, 0.16 * len(counts)), 3.8))
+            ax.bar(range(len(counts)), counts.to_numpy(), color=["#38a169" if is_ctrl.get(t, False) else "#2b6cb0" for t in counts.index])
+            ax.set_xticks(range(len(counts))); ax.set_xticklabels(counts.index, rotation=90, fontsize=6)
+            ax.set_ylabel("cells"); ax.set_title(f"Cells per target gene ({int((~is_ctrl.reindex(counts.index).fillna(False)).sum())} targets)", fontsize=11)
+            ax.axhline(cfg.perturbation.min_cells_per_target, color=RED, ls="--", lw=1)
+            fig.tight_layout()
+            reg.save(fig, "target_representation", S, st, "Cells per target gene", f"Green bars are control groups. The dashed line is perturbation.min_cells_per_target = {cfg.perturbation.min_cells_per_target}; targets below it cannot be tested reliably.")
+    # reference guide_representation: cells assigned per guide, ranked
+    if gc is not None and not gc.empty and "n_cells_single_guide" in gc.columns:
+        rep = gc["n_cells_single_guide"].sort_values(ascending=False).to_numpy()
+        fig, ax = plt.subplots(figsize=(5.4, 3.8))
+        ax.plot(np.arange(1, len(rep) + 1), rep, lw=1.2)
+        ax.set_yscale("symlog"); ax.set_xlabel("Guide rank"); ax.set_ylabel("Cells assigned")
+        ax.set_title(f"Guide representation ({len(rep)} guides, {int((rep == 0).sum())} with no cells)", fontsize=11)
+        fig.tight_layout()
+        reg.save(fig, "guide_representation", S, st, "Guide representation", "Cells assigned per guide, ranked. A steep drop or many zero-cell guides indicates an unbalanced or partly failed guide library.")
     # guide-count diagnostics only when counts exist
     if "guide_total_counts" in obs.columns:
         fig, axes = plt.subplots(1, 3, figsize=(10.8, 3.2))
-        _hist(axes[0], obs["guide_total_counts"].to_numpy(float), "guide UMIs per cell", True, [(cfg.perturbation.assignment.min_umi if hasattr(cfg.perturbation, "assignment") else None, "min_umi")])
+        min_umi = cfg.perturbation.assignment.min_umi if hasattr(cfg.perturbation, "assignment") else None
+        _hist(axes[0], obs["guide_total_counts"].to_numpy(float), "guide UMIs per cell", True, [(min_umi, "min_umi")])
         _hist(axes[1], obs["n_guides_detected"].to_numpy(float), "guides detected per cell")
         if "guide_top_count" in obs and "guide_second_count" in obs:
-            axes[2].scatter(obs["guide_top_count"], obs["guide_second_count"], s=2, alpha=0.4, rasterized=True)
-            axes[2].set_xscale("symlog"); axes[2].set_yscale("symlog")
-            axes[2].set_xlabel("top guide UMIs"); axes[2].set_ylabel("second guide UMIs")
+            x = obs["guide_top_count"].to_numpy(float) + 1; y = obs["guide_second_count"].to_numpy(float) + 1
+            klass = obs["perturbation_class"].astype(str).to_numpy()
+            colors = {"single_targeting": "#2b6cb0", "single_control": "#38a169", "ambiguous": "#dd6b20", "unassigned": "#a0aec0"}
+            for cl, color in colors.items():
+                m = klass == cl
+                if m.sum():
+                    axes[2].scatter(x[m], y[m], s=4, alpha=0.5, color=color, label=cl, linewidths=0, rasterized=True)
+            others = ~np.isin(klass, list(colors))
+            if others.sum():
+                axes[2].scatter(x[others], y[others], s=4, alpha=0.5, color="#805ad5", label="multi-guide", linewidths=0, rasterized=True)
+            ratio = getattr(cfg.perturbation.assignment, "dominance_ratio", None) if hasattr(cfg.perturbation, "assignment") else None
+            if ratio:
+                lim = np.array([1, max(x.max(), y.max())])
+                axes[2].plot(lim, lim / ratio, color=RED, ls="--", lw=1, label=f"ratio = {ratio}")
+            axes[2].set_xscale("log"); axes[2].set_yscale("log")
+            axes[2].set_xlabel("top guide UMIs + 1"); axes[2].set_ylabel("second guide UMIs + 1")
+            axes[2].legend(fontsize=6, frameon=False, markerscale=3)
         fig.suptitle("Guide count diagnostics", fontsize=11)
         fig.tight_layout()
-        reg.save(fig, "guide_count_diagnostics", S, st, "Guide count diagnostics", "Guide UMI depth, guides detected per cell and top-vs-second guide counts.")
+        reg.save(fig, "guide_count_diagnostics", S, st, "Guide count diagnostics", "Guide UMI depth (dashed: min_umi), guides detected per cell, and top-vs-second guide counts coloured by assignment class; cells far below the dashed dominance line have one clearly dominant guide.")
 
 
 def _class_by_condition(obs: pd.DataFrame):

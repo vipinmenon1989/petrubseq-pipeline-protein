@@ -173,7 +173,7 @@ def test_report_html_is_self_contained(filtered_run):
     assert n_embedded == sum(r.in_report for r in filtered_run.registry.records) > 0
     assert 'src="figures/' not in html
     assert not re.search(r'src="(?!data:)', html)
-    for section in ("Run summary", "1. Inputs and modality audit", "2. Cell and RNA QC", "3. Protein QC", "4. Perturbation QC", "5. Representations", "6. Cell states and perturbation enrichment", "7. Outputs and provenance", "Filtering steps"):
+    for section in ("Run summary", "1. Inputs and modality audit", "2. Quality control", "Perturb-seq guide QC", "3. Clustering analysis", "Perturbation strength", "Perturbation enrichment across clusters", "Protein QC", "Outputs and provenance", "Filtering steps"):
         assert section in html, section
     assert "n_top_genes: 50" in html  # resolved config embedded
     assert "rna_min_genes" in html and "prefilter_min_genes" in html
@@ -225,7 +225,7 @@ def test_init_config_round_trip(tmp_path):
     path = tmp_path / "new.yaml"
     assert cli_main(["init-config", str(path)]) == 0
     cfg = Config.from_yaml(path)
-    assert cfg.qc.filter.rna.min_genes == 500 and cfg.qc.prefilter.enabled and cfg.rna.hvg.n_top_genes == 3000
+    assert cfg.qc.filter.rna.min_genes == 1000 and cfg.qc.prefilter.enabled and cfg.rna.hvg.n_top_genes == 3000
     assert cfg.dataset.input_dir.endswith("/data/my_dataset") and cfg.output.dir.endswith("/results/my_dataset")
     d = yaml.safe_load(path.read_text())
     assert set(d) >= {"run", "dataset", "inputs", "qc", "report", "output"}

@@ -2,10 +2,10 @@
 
 Part of the standard run (`analysis.clustering.enabled`, default **on**; the
 SCP1064 regression configs set it to `false` to keep the frozen v0.1 reference
-comparable). Runs as the stage "cell states and
-perturbation enrichment" after the representations. It is independent of the
-perturbation-effect analyses (`docs/PERTURBATION_EFFECTS.md`): none of them uses
-the clusters. Reference audit: `docs/reference/CLUSTERING_ENRICHMENT_AUDIT.md`.
+comparable). Clustering is the first analysis stage after the representations, as in
+the reference pipeline, because the module gene panel (Leiden markers) and the lochNESS
+cluster summary consume the clusters; enrichment runs after the perturbation-strength
+test. Reference audit: `docs/reference/REFERENCE_PIPELINE_COMPLETE_AUDIT.md`.
 
 ## Three complementary views of cell state
 
@@ -13,7 +13,7 @@ the clusters. Reference audit: `docs/reference/CLUSTERING_ENRICHMENT_AUDIT.md`.
 |---|---|---|
 | What discrete transcriptional states exist? | Leiden clustering | defines them |
 | Does a perturbation preferentially occupy a defined state? | perturbation × cluster enrichment | yes |
-| Does a perturbation concentrate locally in expression space? | lochNESS (Stage E) | no |
+| Does a perturbation concentrate locally in expression space? | lochNESS | no |
 
 Cluster enrichment is easy to read ("60 % of JAK2 cells sit in cluster 4, versus 0 %
 of controls") but depends on where the cluster boundaries fall, i.e. on the Leiden
@@ -50,52 +50,51 @@ holding < 50 % of all cells; > 50 % ambiguous/unassigned; median library size �
 
 ## Perturbation × cluster enrichment
 
-For every target with ≥ `min_cells_per_target` (10) single-guide cells and every cluster
-with ≥ `min_cells_per_cluster` (20) cells:
+Port of the reference `enrichment.py` (audit: docs/reference/REFERENCE_PIPELINE_COMPLETE_AUDIT.md
+section C.6; numerical parity: docs/reference/PARITY_RESULTS.md). For every target with
+≥ `min_cells_per_target` (10) single-guide cells and every cluster with ≥ `min_cells_per_cluster`
+(20) cells, and for **each reference arm** in `controls` (`ntc` = single-guide cells of
+`control_classes`; `other` = single-guide targeting cells of every other target):
 
 ```
                    in cluster k    not in k
-    perturbed t          a             b          a + b = n_target_total
-    control              c             d          c + d = n_control_total
+    perturbed t          a             b          a + b = n_target_cells
+    reference            c             d          c + d = n_reference_cells
 ```
 
-* **perturbed** = single-guide targeting cells of t; **control** = single-guide cells
-  of `control_classes` (default non-targeting). `control: other` uses the single-guide
-  targeting cells of all other targets instead (explicit alternative; the reference
-  pipeline's default). Ambiguous, multi-guide, mixed and unassigned cells are never counted.
-* **test**: two-sided Fisher exact test (`scipy.stats.fisher_exact`); `odds_ratio` is the
-  sample odds ratio a·d / (b·c) it returns (0 or ∞ when a count is 0 — kept as is);
-  `log2_or_haldane` = log2((a+½)(d+½) / ((b+½)(c+½))), finite, for ranking and the heatmap.
-* **multiple testing**: Benjamini–Hochberg over **all tested (target, cluster) pairs of
-  the run** (one family); `significant` = FDR < `fdr_alpha` (0.05). Odds ratios alone are
-  never called significant.
-* **direction**: enriched when a/(a+b) > c/(c+d), depleted when lower.
-* **low_power**: fewer than `min_control_cells_in_cluster` (10) control cells in the
-  cluster. When the cluster holds no controls at all the test can still be decisive (a
-  state occupied only by perturbed cells); the flag then says the control reference is
-  thin, not that the result is weak — read `n_control_in_cluster`.
-* **guide support**: for each guide of t with ≥ `min_cells_per_guide` (5) cells, the guide
-  supports the pair when its own in-cluster fraction lies on the same side of the control
-  fraction as the target-level direction (so depletions can be supported).
-  `n_guides_observed`, `n_guides_supporting_direction`, `guide_support_fraction`. Guides
-  are not tested individually and are not independent replicates; this is a consistency
-  check against single-guide artefacts.
-* **stratified test** (`stratify_by`, any obs column, default none): a Cochran–Mantel–
-  Haenszel test across the column's levels (`statsmodels` `StratifiedTable`; strata with
-  an empty margin dropped) reported *beside* the Fisher result (`cmh_odds_ratio`,
-  `cmh_p_value`, `cmh_fdr`, own BH family), so a cluster that simply differs in size
-  between samples or lanes cannot pass as a perturbation effect.
-* **omnibus** (`uns[...]['analysis']['cell_states']['enrichment']['omnibus']`): chi-square
-  of the perturbed-target × cluster table with a seeded 1,000-permutation p-value, and the
-  share of expected counts below 5 (a screen, not the inferential result).
+* **test**: two-sided Fisher exact test (`pval`, also kept as `pval_fisher`); with
+  `stratify_by` set to an obs column with ≥ 2 levels, a Cochran–Mantel–Haenszel test over
+  the strata **replaces** the pooled p-value and, when finite, the pooled odds ratio replaces
+  the Haldane one (`cmh_odds_ratio`, `cmh_pval`, `cmh_n_strata` are added);
+* `odds_ratio` = Haldane-Anscombe ((a+½)(d+½))/((b+½)(c+½)), finite at zero counts;
+  `log2_odds_ratio`; `sample_odds_ratio` = a·d/(b·c) (extra column);
+* `pct_of_target`, `pct_of_reference`; `direction` enriched when the target's share exceeds
+  the reference's, else depleted; `low_power` = fewer than `min_reference_cells` (10)
+  reference cells in the cluster;
+* **multiple testing**: Benjamini–Hochberg **within each arm**; `significant` = FDR <
+  `fdr_alpha` under the `primary_control` arm (reference default `other`: the non-targeting
+  group is small and contributes few cells exactly in the rare clusters);
+* **guide concordance** (significant pairs only): guides of *t* with ≥ `min_cells_per_guide`
+  (5) cells whose in-cluster fraction lies on the same side of the reference fraction as the
+  direction → `guides_concordant`, `guides_tested`;
+* **omnibus**: chi-square of the targeting-cell target × cluster table, % expected counts
+  below 5, and a seeded permutation p-value in which every target's row is resampled from a
+  multinomial with the pooled cluster proportions (`n_permutations` 1000);
+* per target: `composition` (% of the target's cells per cluster), each arm's
+  `reference_composition`, and `effect_magnitude` (total variation distance from the primary
+  reference composition, number of significant clusters); `phenocopy_similarity` = Pearson
+  correlation of the composition profiles between targets (figure).
 
-Outputs: `perturbation_cluster_enrichment.csv` (and `uns['perturbation_cluster_enrichment']`),
-`cluster_enrichment_vs_lochness.csv` (per target: number of significant clusters, the
-strongest enriched and depleted cluster with log2 OR and FDR, lochNESS own-cell mean,
-delta and FDR when Stage E ran), `cluster_enrichment_skipped.csv`. Figures (report
-section "Cell states and perturbation enrichment"): RNA UMAP by cluster; cluster sizes
-with composition by perturbation class and by sample/lane/batch; target × cluster
-heatmap (colour = Haldane log2 OR, * = FDR < alpha, o = low power).
+Outputs (`tables/cell_states/`): `perturbation_cluster_enrichment.csv` (both arms; also
+`uns['perturbation_cluster_enrichment']`), `enrichment.csv` (reader view of the primary arm),
+`enrichment_composition.csv`, `enrichment_reference_composition.csv`,
+`enrichment_effect_magnitude.csv`, `cluster_enrichment_vs_lochness.csv` (descriptive
+side-by-side, extension), `cluster_enrichment_skipped.csv`. Figures (report section
+*Perturbation enrichment across clusters*): `enrichment_heatmap` (rows ordered by profile
+similarity, `*` = FDR < α), `enrichment_phenocopy`, `enrichment_composition` (reference +
+top 30 targets by shift), `enrichment_volcano`, `enrichment_effect_magnitude`, and
+`enrichment_<target>` (composition vs reference, log2 OR per cluster, the target's cells on
+the UMAP; the 12 strongest embedded, all on disk).
 
 ## Limitations
 

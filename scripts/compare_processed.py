@@ -33,7 +33,10 @@ DEFAULT_ALLOW_UNS = ["petrubseq_protein/provenance", "petrubseq_protein/config",
 # Slots that a newer schema may ADD (present only in NEW) without being a regression.
 # Everything else that exists in only one object is a DIFF; anything present in
 # both is compared strictly regardless of these lists.
-ADDITIVE_OBS = {"has_guide_counts", "guide_total_counts", "n_guides_detected", "guides_detected", "guide_top", "guide_top_count", "guide_second_count", "guide_dominant_call", "lane_id", "barcode_original"}
+ADDITIVE_OBS = {"has_guide_counts", "guide_total_counts", "n_guides_detected", "guides_detected", "guide_top", "guide_top_count", "guide_second_count", "guide_dominant_call", "lane_id", "barcode_original",
+                # reference-parity QC additions (haemoglobin gene class, as in perturbseq-pipeline qc.py)
+                "pct_counts_hb", "total_counts_hb", "log1p_total_counts_hb"}
+ADDITIVE_VAR = {"hb"}
 ADDITIVE_OBSM = {"guide_counts"}
 ADDITIVE_UNS_TOP = {"guide_features"}
 ADDITIVE_PROTEIN_FEATURE_COLS = {"feature_id", "antibody_name", "protein_name", "gene_symbol", "clone", "feature_type", "isotype", "annotation_source"}
@@ -95,7 +98,7 @@ def main() -> int:
     # obs / var columns
     for name, da, db in (("obs", A.obs, B.obs), ("var", A.var, B.var)):
         only_a, only_b = sorted(set(da.columns) - set(db.columns)), sorted(set(db.columns) - set(da.columns))
-        additive = name == "obs" and not only_a and all(c in ADDITIVE_OBS for c in only_b)
+        additive = not only_a and all(c in (ADDITIVE_OBS if name == "obs" else ADDITIVE_VAR) for c in only_b)
         rec(f"{name} columns", not only_a and not only_b, f"only in reference: {only_a}; only in new: {only_b}", added=additive)
         for c in sorted(set(da.columns) & set(db.columns)):
             x, y = da[c], db[c]

@@ -8,8 +8,8 @@ self-contained report, in one command.
 
 ```
 input → QC → guide assignment → RNA (+ protein) preprocessing → PCA / neighbours / UMAP
-      → Leiden clustering → perturbation × cluster enrichment
-      → PS → lochNESS → gene programs / perturbation modules
+      → Leiden clustering → perturbation strength → perturbation × cluster enrichment
+      → gene programs / perturbation modules → PS → lochNESS
       → protein effects → RNA–protein concordance   (both only when protein exists)
       → report.html + processed .h5ad
 ```
@@ -38,11 +38,12 @@ Everything becomes one canonical model and is validated before processing: dupli
 barcodes/features, negative or non-integer "counts", unclaimed feature types, missing
 h5ad slots, metadata sharing no cell with the RNA matrix.
 
-**2 · QC.** Prefilter (200 genes, genes in ≥ 3 cells), strict filter (≥ 500 genes,
-≤ 20 % mito; protein and perturbation criteria optional) recorded step by step,
-flags that never remove cells. RNA, protein (ADT depth, antibodies detected,
-isotype background) and guide QC (guide UMIs, guides per cell, top-vs-second guide)
-figures, before and after filtering.
+**2 · QC.** Reference Perturb-seq QC: prefilter (200 genes, genes in ≥ 3 cells),
+QC metrics (mt, ribo, hb) on the raw counts, strict filter (≥ 1,000 genes, < 20 %
+mito, optional counts / % hb, then genes in ≥ 3 retained cells) recorded step by step;
+protein and perturbation criteria optional; flags that never remove cells. RNA,
+protein (ADT depth, antibodies detected, isotype background) and guide QC (guide UMIs,
+guides per cell, top-vs-second guide, cells per target / per guide) figures.
 
 **3 · Guide assignment.** Provided per-cell guide lists / metadata columns, or calls
 from guide counts: `dominant` (top guide ≥ 3 UMIs and > 2× the runner-up, else
@@ -51,39 +52,50 @@ Classes `single_targeting`, `single_control`, `multi_targeting`, `multi_control`
 `mixed_control_targeting`, `ambiguous`, `unassigned`. When both a provided list and
 guide counts exist the run asks you to choose and reports their agreement.
 
-**4 · RNA and protein preprocessing.** Raw counts normalized once (10,000, log1p);
-log-normalized input preserved and integer counts reconstructed when a library size
-is given. Up to 3,000 HVGs, 50 PCs, 15-neighbour graph, UMAP. Protein: raw ADT
-counts kept, per-protein CLR across cells, isotypes used for QC and excluded from the
-protein PCA/UMAP; supplied normalized values preserved, never treated as counts.
+**4 · RNA and protein preprocessing.** Raw counts normalized once (median library
+size, log1p, as the reference); log-normalized input preserved and integer counts
+reconstructed when a library size is given. 3,000 HVGs, scaled HVG block, 50 PCs,
+15-neighbour graph, UMAP, Leiden (resolution 1.0, igraph, seeded), bit-identical to
+the reference pipeline. Protein: raw ADT counts kept, per-protein CLR across cells,
+isotypes used for QC and excluded from the protein PCA/UMAP; supplied normalized
+values preserved, never treated as counts.
 
-**5 · Cell states and perturbation enrichment.** Leiden on the RNA neighbour graph
-(igraph backend, resolution 1.0, seeded); cluster sizes, composition by perturbation
-class / sample / lane, depth; flags for clusters dominated by one sample, by
-ambiguous cells or by library depth. **Perturbation × cluster enrichment**: Fisher
-exact test of each target's single-guide cells vs non-targeting controls per
-cluster, BH-FDR over all pairs, guide agreement per pair, optional Cochran–Mantel–
-Haenszel across a sample/lane column. Runs in every standard run
-(`analysis.clustering.enabled: false` skips it).
+**5 · Perturbation strength.** For every target whose gene is measured, the gene's
+*own* expression in perturbed vs control cells (non-targeting and other-target arms):
+log2FC on de-logged means, Kolmogorov–Smirnov and Mann–Whitney tests, BH-FDR per
+arm, effective knockdown = KS FDR < 0.05 and log2FC < 0; volcano, waterfall,
+control comparison and one ECDF / violin / UMAP figure per target.
 
-**6 · Perturbation response** *(optional, `analysis.perturbation_effects`)*.
-**PS**: per-cell perturbation-response score (Song et al. 2025), max-normalized
-within target, with knockdown / escaper / non-responder quadrants and a
-cross-target separation (AUC, Cohen's d). **lochNESS**: cluster-free local
-enrichment of each perturbation in PCA space (Huang et al. 2023), k = 300 capped
-at 10 % of cells, permutation null, control-referenced delta. Cluster enrichment
-and lochNESS are reported side by side, never combined.
+**6 · Perturbation × cluster enrichment.** Fisher exact test (or Cochran–Mantel–
+Haenszel across a sample/lane column) of each target's single-guide cells per
+Leiden cluster against both reference arms (`other` drives the calls), Haldane odds
+ratios, BH within arm, guide concordance for significant pairs, omnibus permutation
+test, composition / phenocopy / volcano / effect-magnitude figures and one per target.
 
-**7 · Gene programs and perturbation modules** *(optional)*. Perturbation × response-
-gene log2FC matrix vs non-targeting controls; genes clustered into programs
-(`P1..`, 1 − Pearson), perturbations into modules (`M1..`, 1 − Spearman), after
-Zhou et al. 2023; per-cell program activity. Numbered, never named.
+**7 · Co-functional modules and gene programs.** Perturbation × gene log2FC matrix
+over the union of Leiden cluster markers, vs non-targeting controls; genes clustered
+into programs (`P1..`, 1 − Pearson), perturbations into modules (`M1..`, 1 − Spearman)
+after Zhou et al. 2023; module × program strength, alluvial, TF hubs / edges /
+module connectivity, program activity per cell (`score_genes`) and per cluster.
 
-**8 · Protein effects and RNA–protein concordance** *(optional, needs protein)*.
-Per target × protein: CLR mean difference, Cohen's d, Mann–Whitney p, BH-FDR,
-sign consistency per sample and per guide. Concordance: PS ↔ protein within target
-(Spearman, FDR), lochNESS ↔ protein across targets, program activity ↔ protein
-per cell and per target, plus one integrated target-level table. Associations only.
+**8 · Per-cell perturbation response (PS)** (Song et al. 2025, PS_python definition
+re-implemented): per-cell score in [0, 1], knockdown / escaper / non-responder /
+low-signal quadrants against the target's own expression, agreement with the
+group-level test, and the supervised LDA embedding with per-target maps.
+
+**9 · lochNESS.** Cluster-free local enrichment of each perturbation among its 300
+nearest neighbours in PCA space (Huang et al. 2023): self-enrichment ranking,
+distributions, mean per cluster, self score on the UMAP and one map per
+perturbation. Cluster enrichment and lochNESS are shown side by side, never combined.
+
+**10 · Protein extension** *(needs protein)*. Per target × protein: CLR mean
+difference, Cohen's d, Mann–Whitney p, BH-FDR, sign consistency per sample and per
+guide. Concordance: PS ↔ protein within target, lochNESS ↔ protein across targets,
+program activity ↔ protein per cell and per target, plus one integrated table.
+Associations only.
+
+Stages 5–9 reproduce the reference `weili-lab/perturbseq-pipeline` numerically
+(docs/reference/PARITY_RESULTS.md); stage 10 is the multimodal addition.
 
 ---
 

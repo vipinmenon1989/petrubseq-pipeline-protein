@@ -63,7 +63,8 @@ def make(seed: int = 0, n_ctrl: int = 200, n_per: int = 80, rare: int = 0, ambig
 
 
 def cfg(**pe) -> Config:
-    base = {"enabled": True, "lochness": {"n_permutations": 50, "n_neighbors": 50, "max_k_fraction": 1.0}, "modules": {"n_programs": 2, "n_modules": 3, "min_cells_per_perturbation": 20}}
+    # the synthetic object has no Leiden clusters, so the module panel uses the 'response' selection explicitly
+    base = {"enabled": True, "lochness": {"n_permutations": 50, "n_neighbors": 50, "max_k_fraction": 1.0}, "modules": {"n_programs": 2, "n_modules": 3, "min_cells_per_perturbation": 20, "gene_selection": "response", "log2fc_pseudocount": 1.0, "min_pct_cells_expressing": 5.0}, "ps": {"compute_lda_umap": False}}
     for k, v in pe.items():
         base[k] = {**base.get(k, {}), **v} if isinstance(v, dict) else v
     return Config.from_dict({"inputs": {"rna": {"file": "x"}}, "analysis": {"perturbation_effects": base}})
@@ -116,6 +117,28 @@ def test_ps_quadrants_use_target_gene(res):
     s = res.ps.summary.set_index("target")
     assert {"pct_successful_kd", "pct_escaper", "net_pct_kd"} <= set(s.columns)
     assert np.isfinite(s.loc["TA", "pct_successful_kd"])
+    # reference order: summary sorted by pct_successful_kd, and top_targets follows it
+    kd = res.ps.summary["pct_successful_kd"].to_numpy()
+    assert (np.diff(kd) <= 1e-12).all() and res.ps.top_targets(2) == list(res.ps.summary["target"].head(2))
+
+
+def test_ps_skips_targets_without_gene_by_default(data):
+    a = data.copy()
+    a.var_names = ["X" + g if g == "TA" else g for g in a.var_names]  # TA's gene symbol disappears from var
+    r = PS.compute_ps(a, cfg())
+    assert "TA" not in set(r.summary["target"]) and (r.skipped["target"] == "TA").any()
+    r2 = PS.compute_ps(a, cfg(ps={"score_targets_without_gene": True}))
+    assert "TA" in set(r2.summary["target"]) and r2.summary.set_index("target").loc["TA", "status"] == "scored_no_target_gene"
+
+
+def test_ps_lda_embedding(data):
+    r = PS.compute_ps(data, cfg(ps={"compute_lda_umap": True, "lda_n_pcs": 10, "lda_max_genes": None}))
+    assert r.lda_umap is not None and r.lda_umap.shape == (data.n_obs, 2)
+    placed = np.isfinite(r.lda_umap).all(axis=1)
+    lab = r.lda_label
+    assert placed.sum() > 0 and set(lab[placed].unique()) <= set(r.summary["target"]) | {"NT"}
+    amb = (data.obs["perturbation_class"] == "ambiguous").to_numpy()
+    assert not placed[amb].any() and (lab[amb] == "Other").all()
 
 
 def test_ps_insufficient_controls():
@@ -151,6 +174,21 @@ def test_lochness_k_cap():
     a = make(n_per=30, n_ctrl=60)
     r = L.compute_lochness(a, cfg(lochness={"n_neighbors": 300, "max_k_fraction": 0.1, "n_permutations": 0}))
     assert r.info["k_capped"] and r.info["k_used"] == max(15, int(0.1 * a.n_obs))
+    # reference default: k = min(n_neighbors, n - 1), no fraction cap, no permutation null
+    r2 = L.compute_lochness(a, cfg(lochness={"n_neighbors": 300, "max_k_fraction": 1.0, "n_permutations": 0}))
+    assert r2.info["k_used"] == a.n_obs - 1 and "z_score" not in r2.summary.columns and "fdr" not in r2.summary.columns
+    c = Config.from_dict({"inputs": {"rna": {"file": "x"}}}).analysis.perturbation_effects.lochness
+    assert c.max_k_fraction == 1.0 and c.n_permutations == 0 and c.n_neighbors == 300 and c.n_pcs == 20
+
+
+def test_lochness_cluster_summary(data):
+    a = data.copy()
+    rng = np.random.default_rng(0)
+    a.obs["leiden"] = pd.Categorical(rng.choice(["0", "1", "2"], a.n_obs))
+    r = L.compute_lochness(a, cfg(lochness={"n_permutations": 0}))
+    assert not r.by_cluster.empty and list(r.by_cluster.columns) == ["0", "1", "2"] and {"top_cluster", "top_cluster_mean"} <= set(r.summary.columns)
+    t = r.summary.set_index("target")
+    assert t.loc["TB", "top_cluster"] == r.by_cluster.loc["TB"].idxmax() and np.isclose(t.loc["TB", "top_cluster_mean"], r.by_cluster.loc["TB"].max())
 
 
 def test_lochness_formula():
@@ -179,6 +217,25 @@ def test_modules_deterministic_and_insufficient(data, res):
     assert list(again.perturbation_modules["module"]) == list(res.modules.perturbation_modules["module"])
     few = M.compute_modules(data, cfg(modules={"min_perturbations": 50}))
     assert few.empty and "skipped" in few.info["status"]
+
+
+def test_modules_reference_defaults_and_cluster_markers(data):
+    c = Config.from_dict({"inputs": {"rna": {"file": "x"}}}).analysis.perturbation_effects.modules
+    assert c.gene_selection == "cluster_markers" and c.log2fc_pseudocount == 1e-9 and c.min_pct_cells_expressing == 0 and c.control == "ntc" and c.program_scoring == "score_genes"
+    a = data.copy()
+    # two 'states': cells with the block-0 response vs the rest -> block-0 genes become cluster markers
+    lab = a.obs["target"].astype(str).isin(["TA", "TB"]).map({True: "1", False: "0"})
+    a.obs["leiden"] = pd.Categorical(lab)
+    r = M.compute_modules(a, cfg(modules={"gene_selection": "cluster_markers", "n_marker_genes_per_cluster": 30, "log2fc_pseudocount": 1e-9, "min_pct_cells_expressing": 0.0}))
+    assert not r.empty and r.info["gene_selection"] == "cluster_markers" and 0 < r.effect.shape[1] <= 60
+    assert sum(g in set(r.effect.columns) for g in [f"G{i}" for i in range(10, 30)]) >= 10  # block-0 response genes are markers of state 1
+    assert not r.program_activity_by_cluster.empty and list(r.program_activity_by_cluster.columns) == ["0", "1"]
+    assert {"hubs", "tf_edges", "module_connectivity"} and r.hubs["n_de_genes"].max() >= 1 and r.module_connectivity.shape[0] == r.n_modules
+    # 'other' control: leave-one-target-out targeting cells
+    r2 = M.compute_modules(a, cfg(modules={"gene_selection": "cluster_markers", "n_marker_genes_per_cluster": 30, "control": "other"}))
+    assert r2.control == "other" and not r2.empty
+    # reference program scoring
+    assert r.info["program_activity"].startswith("sc.tl.score_genes") and r.program_activity.shape == (a.n_obs, r.n_programs)
 
 
 # ------------------------------------------------------------- protein
@@ -248,8 +305,8 @@ def synth_raw(tmp_path_factory):
 def test_pipeline_disabled_adds_nothing(synth_raw, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
-    a = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}}))).adata
-    assert "analysis" not in a.uns["petrubseq_protein"] and "ps_scores" not in a.obsm and "ps_score" not in a.obs
+    a = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}, "perturbation_effects": {"enabled": False}}))).adata
+    assert "analysis" not in a.uns["petrubseq_protein"] and "ps_scores" not in a.obsm and "ps_score" not in a.obs and "perturbation_strength" not in a.uns
     assert not (tmp_path / "tables" / "perturbation_effects").exists()
 
 
@@ -258,6 +315,7 @@ def test_pipeline_enabled_end_to_end(synth_raw, tmp_path):
 
     pe = {"enabled": True, "lochness": {"n_permutations": 20}, "modules": {"min_cells_per_perturbation": 10, "min_perturbations": 3, "n_programs": 2}, "ps": {"min_cells_per_target": 10}}
     r = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, analysis={"perturbation_effects": pe, "clustering": {"enabled": False}})))
+    assert "perturbation_strength" in r.adata.uns and (tmp_path / "tables" / "perturbation_strength" / "perturbation_full.csv").is_file()
     a = ad.read_h5ad(next((tmp_path / 'processed').glob('*.h5ad')))
     info = a.uns["petrubseq_protein"]["analysis"]["perturbation_effects"]
     assert info["ps"]["n_targets_scored"] >= 1 and "k_used" in info["lochness"]
@@ -267,4 +325,4 @@ def test_pipeline_enabled_end_to_end(synth_raw, tmp_path):
     man = pd.read_csv(tmp_path / "tables" / "figure_manifest.csv")
     assert (man["section"] == "perturbation_effects").sum() >= 4
     html = r.report_html.read_text()
-    assert "6. Perturbation effects" in html and "7. Outputs and provenance" in html
+    assert "Perturbation strength" in html and "Per-cell perturbation response" in html and "Protein effects" in html and "Outputs and provenance" in html

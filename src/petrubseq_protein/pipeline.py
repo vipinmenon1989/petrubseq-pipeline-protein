@@ -127,7 +127,7 @@ def run_pipeline(cfg: Config) -> PipelineResult:
     t0 = time.time()
     pe_enabled = cfg.analysis.perturbation_effects.enabled
     cs_enabled = cfg.analysis.clustering.enabled
-    st = _Stages(N_STAGES + (1 if pe_enabled else 0) + (1 if cs_enabled else 0))
+    st = _Stages(N_STAGES + (2 if pe_enabled else 0) + (1 if cs_enabled else 0) + (1 if (cs_enabled and cfg.analysis.clustering.enrichment.enabled) else 0))
     warnings: List[str] = []
     notes: List[str] = []
     tables: Dict[str, pd.DataFrame] = {}
@@ -401,13 +401,45 @@ def run_pipeline(cfg: Config) -> PipelineResult:
         r = d.get("protein_pc_vs_log_total_adt", {}).get("PC1")
         if r is not None and r > 0.7:
             warnings.append(f"Protein PC1 correlates with ADT depth (|r| = {r:.2f}); the protein embedding is depth-driven (documented CITE-seq effect, not corrected).")
-    # 17b (only with analysis.perturbation_effects.enabled) ---------------
+    # 17b-17e: the reference analysis order (docs/reference/REFERENCE_PIPELINE_COMPLETE_AUDIT.md):
+    #   Leiden clustering -> perturbation strength -> perturbation x cluster enrichment
+    #   -> modules / programs -> PS -> lochNESS -> protein effects -> concordance
     pe_res = None
+    cs_res = None
+    if cs_enabled:
+        with st.stage("cell states (Leiden clustering)"):
+            from . import analysis as cs_analysis
+            from .reporting.cell_state_plots import clustering_figures
+            cs_res = cs_analysis.run_clustering(adata, cfg)
+            clustering_figures(cs_res, adata, cfg, registry)
+            for f in cs_res.clustering.flags:
+                warnings.append(f"Leiden {f} (see tables/cell_states/cluster_summary.csv).")
     if pe_enabled:
-        with st.stage("perturbation effects"):
+        with st.stage("perturbation strength"):
             from . import analysis as pe_analysis
+            from .reporting.strength_plots import perturbation_strength_figures
+            strength = pe_analysis.run_perturbation_strength(adata, cfg)
+            if strength is not None:
+                perturbation_strength_figures(strength, adata, cfg, registry)
+                if strength.empty:
+                    warnings.append(f"Perturbation strength not computed: {strength.info.get('status')}.")
+                elif len(strength.skipped):
+                    notes.append(f"Perturbation strength: {len(strength.skipped)} target(s) not testable (tables/perturbation_strength/skipped.csv).")
+                if strength.primary_control != cfg.analysis.perturbation_effects.strength.primary_control:
+                    warnings.append(f"Perturbation strength: requested primary control {cfg.analysis.perturbation_effects.strength.primary_control!r} unavailable; {strength.primary_control!r} drives ranking and hit calls.")
+    else:
+        strength = None
+    if cs_enabled and cfg.analysis.clustering.enrichment.enabled:
+        with st.stage("perturbation x cluster enrichment"):
+            from .reporting.enrichment_plots import enrichment_figures
+            cs_res = cs_analysis.run_enrichment(adata, cfg, cs_res)
+            enrichment_figures(cs_res.enrichment, adata, cfg, registry)
+            if cs_res.enrichment is not None and cs_res.enrichment.empty:
+                notes.append(f"Perturbation x cluster enrichment not computed: {cs_res.enrichment.info.get('status')}.")
+    if pe_enabled:
+        with st.stage("perturbation effects (modules, PS, lochNESS, protein, concordance)"):
             from .reporting.perturbation_plots import perturbation_effect_figures
-            pe_res = pe_analysis.run_perturbation_effects(adata, cfg)
+            pe_res = pe_analysis.run_perturbation_effects(adata, cfg, strength)
             pe_analysis.attach(adata, pe_res)
             perturbation_effect_figures(pe_res, adata, cfg, registry)
             for name, r in (("PS", pe_res.ps), ("lochNESS", pe_res.lochness), ("protein effects", pe_res.protein)):
@@ -415,21 +447,13 @@ def run_pipeline(cfg: Config) -> PipelineResult:
                     notes.append(f"{name}: {len(r.skipped)} target(s) not analysed (see tables/perturbation_effects/*_skipped.csv or the {name} table).")
             if pe_res.modules is not None and pe_res.modules.empty:
                 warnings.append(f"Gene programs / perturbation modules not computed: {pe_res.modules.info.get('status')}.")
+            if pe_res.ps is not None and pe_res.ps.lda_note:
+                notes.append(f"PS: the supervised LDA embedding was not built: {pe_res.ps.lda_note}.")
             if pe_res.lochness is not None and pe_res.lochness.info.get("k_capped"):
-                notes.append(f"lochNESS k capped at {pe_res.lochness.info['k_used']} (= {cfg.analysis.perturbation_effects.lochness.max_k_fraction:g} x {adata.n_obs} cells) instead of {cfg.analysis.perturbation_effects.lochness.n_neighbors}.")
-    # 17c (only with analysis.clustering.enabled) ---------------------------
-    cs_res = None
-    if cs_enabled:
-        with st.stage("cell states and perturbation enrichment"):
-            from . import analysis as cs_analysis
-            from .reporting.cell_state_plots import cell_state_figures
-            loch_sum = pe_res.lochness.summary if (pe_res is not None and pe_res.lochness is not None) else None
-            cs_res = cs_analysis.run_cell_states(adata, cfg, loch_sum)
-            cell_state_figures(cs_res, adata, cfg, registry)
-            for f in cs_res.clustering.flags:
-                warnings.append(f"Leiden {f} (see tables/cell_states/cluster_summary.csv).")
-            if cs_res.enrichment is not None and cs_res.enrichment.empty:
-                notes.append(f"Perturbation x cluster enrichment not computed: {cs_res.enrichment.info.get('status')}.")
+                notes.append(f"lochNESS k reduced to {pe_res.lochness.info['k_used']} (max_k_fraction {cfg.analysis.perturbation_effects.lochness.max_k_fraction:g} x {adata.n_obs} cells) instead of {cfg.analysis.perturbation_effects.lochness.n_neighbors}.")
+            if cs_res is not None and cs_res.enrichment is not None and not cs_res.enrichment.empty and pe_res.lochness is not None:
+                from .analysis.cluster_enrichment import compare_with_lochness
+                cs_res.enrichment.lochness_comparison = compare_with_lochness(cs_res.enrichment, pe_res.lochness.summary)
     # 18 -----------------------------------------------------------------
     with st.stage("processed h5ad"):
         prov = provenance.collect(cfg.source_path, input_rec, extra={"alignment": ares.to_dict(), "run_name": run_name})
@@ -495,7 +519,7 @@ def run_pipeline(cfg: Config) -> PipelineResult:
             gz = name in ("cell_qc", "cell_qc_prefilter")
             p = tdir / f"{name}.csv{'.gz' if gz else ''}"
             p.parent.mkdir(parents=True, exist_ok=True)
-            long_form = long_form or (name.startswith(("perturbation_effects/", "cell_states/")) and isinstance(df.index, pd.RangeIndex))
+            long_form = long_form or (name.startswith(("perturbation_effects/", "cell_states/", "perturbation_strength/")) and isinstance(df.index, pd.RangeIndex))
             df.to_csv(p, index=not long_form)
             table_paths[name] = p
     # 20 -----------------------------------------------------------------
@@ -686,16 +710,22 @@ def object_schema(adata: ad.AnnData, rna_info: Dict[str, Any], prot_info: Dict[s
         elif key == "X_pca":
             sch["obsm['X_pca']"] = {"shape": shape, "content": "RNA PCA on scaled HVGs", "status": "derived"}
         elif key == "X_pca_protein":
-            sch["obsm['X_pca_protein']"] = {"shape": shape, "content": f"protein PCA on obsm['{prot_info.get('embedding_key')}'] (isotypes excluded, scaled)", "status": "derived"}
+            sch["obsm['X_pca_protein']"] = {"shape": shape, "content": f"protein PCA on obsm['{prot_info.get('embedding_key')}'] (isotypes excluded, scaled and decomposed in float64, stored float32)", "status": "derived"}
         elif key == "X_multimodal":
             sch["obsm['X_multimodal']"] = {"shape": shape, "content": f"block-normalized RNA PCs + {cfg.multimodal.protein_weight} x protein PCs", "status": "derived"}
+        elif key == "X_lda_umap":
+            continue
         elif key.startswith("X_umap_"):
             sch[f"obsm['{key}']"] = {"shape": shape, "content": {"X_umap_rna": "UMAP of RNA neighbors", "X_umap_protein": "UMAP of protein neighbors", "X_umap_multimodal": "UMAP of multimodal neighbors"}.get(key, "provided embedding (input)"), "status": "derived" if key != cfg.inputs.embedding.key else "input"}
     ckey = cfg.analysis.clustering.key
     if cfg.analysis.clustering.enabled and ckey in adata.obs.columns:
         sch[f"obs['{ckey}']"] = {"shape": f"{adata.n_obs} cells, {adata.obs[ckey].nunique()} clusters", "content": "Leiden cluster on the RNA neighbour graph (numbered states, not cell types)", "status": "derived (Stage F)"}
     if "perturbation_cluster_enrichment" in adata.uns:
-        sch["uns['perturbation_cluster_enrichment']"] = {"shape": f"{len(adata.uns['perturbation_cluster_enrichment'])} rows", "content": "target x cluster Fisher enrichment vs controls (odds ratio, p, BH-FDR, direction, guide support)", "status": "derived (Stage F)"}
+        sch["uns['perturbation_cluster_enrichment']"] = {"shape": f"{len(adata.uns['perturbation_cluster_enrichment'])} rows", "content": "target x cluster Fisher/CMH enrichment under both control arms (Haldane odds ratio, p, BH-FDR per arm, direction, guide concordance)", "status": "derived"}
+    if "perturbation_strength" in adata.uns:
+        sch["uns['perturbation_strength']"] = {"shape": f"{len(adata.uns['perturbation_strength'])} rows", "content": "per-target knockdown of the target's own expression vs ntc / other controls (log2FC, KS, MWU, BH-FDR, hit call, rank)", "status": "derived"}
+    if "X_lda_umap" in adata.obsm:
+        sch["obsm['X_lda_umap']"] = {"shape": f"{adata.n_obs} x 2", "content": "supervised LDA-UMAP of the scored targets + controls (PS_python compute_lda_umap); NaN for cells outside the trained classes", "status": "derived"}
     if "guide_features" in adata.uns:
         sch["uns['guide_features']"] = {"shape": f"{len(adata.uns['guide_features'])} rows", "content": "one row per guide: target, control_class, total_umis, n_cells_detected, n_cells_dominant (+ 10x feature columns)"}
     sch["uns['protein_features']"] = {"shape": f"{len(adata.uns['protein_features'])} rows" if "protein_features" in adata.uns else "", "content": "one row per antibody: role, isotype control, presence in each matrix, used_in_embedding/used_in_qc"}

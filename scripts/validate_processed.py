@@ -195,7 +195,18 @@ def main() -> int:
         check("protein feature annotation columns", all(c in feats.columns for c in ann), f"missing {[c for c in ann if c not in feats.columns]}")
         if "feature_id" in feats.columns:
             check("protein feature_id filled", bool((feats["feature_id"].astype(str) != "").all()))
-    # --- Stage E (only when analysis.perturbation_effects ran) -------------------
+    # --- perturbation strength (reference stage) ---------------------------------
+    if "perturbation_strength" in adata.uns:
+        st = adata.uns["perturbation_strength"]
+        check("perturbation strength table", {"target", "rank", "n_perturbed"} <= set(st.columns) and len(st) > 0, f"{len(st)} targets tested")
+        hits = [c for c in st.columns if c.startswith("is_hit_")]
+        check("perturbation strength hit calls present", bool(hits), str(hits))
+        for c in [c for c in st.columns if c.startswith("log2fc_")]:
+            arm = c[len("log2fc_"):]
+            if f"is_hit_{arm}" in st.columns:
+                h = st[f"is_hit_{arm}"].astype(str) == "True"
+                check(f"hits under {arm} have negative log2FC", bool((st.loc[h, c].astype(float) < 0).all()), f"{int(h.sum())} hits")
+    # --- perturbation effects (only when analysis.perturbation_effects ran) --------
     pe = u.get("analysis", {}).get("perturbation_effects") if isinstance(u.get("analysis"), dict) else None
     if pe:
         if "ps_scores" in adata.obsm:
@@ -228,7 +239,9 @@ def main() -> int:
         if "perturbation_cluster_enrichment" in adata.uns:
             e = adata.uns["perturbation_cluster_enrichment"]
             check("enrichment FDR in [0, 1]", bool(e["fdr"].astype(float).between(0, 1).all()), f"{len(e)} tests")
-            check("enrichment counts consistent", bool((e["n_target_in_cluster"].astype(int) <= e["n_target_total"].astype(int)).all() and (e["n_control_in_cluster"].astype(int) <= e["n_control_total"].astype(int)).all()))
+            check("enrichment counts consistent", bool((e["n_in_cluster"].astype(int) <= e["n_target_cells"].astype(int)).all() and (e["n_reference_in_cluster"].astype(int) <= e["n_reference_cells"].astype(int)).all()))
+            check("enrichment: both control arms present", set(e["control"].astype(str)) >= {"ntc", "other"} or e["control"].astype(str).nunique() == 1, f"arms {sorted(e['control'].astype(str).unique())}")
+            check("enrichment: significance only under the primary arm", bool(e.loc[e["significant"].astype(str) == "True", "control"].astype(str).nunique() <= 1))
     if "lane_id" in obs.columns:
         check("lane columns consistent", "barcode_original" in obs.columns and bool(obs["lane_id"].astype(str).ne("").all()), f"{obs['lane_id'].nunique()} lanes")
     # --- print ------------------------------------------------------------------------

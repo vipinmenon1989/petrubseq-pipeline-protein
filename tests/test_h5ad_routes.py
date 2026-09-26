@@ -55,7 +55,7 @@ def test_h5ad_rna_guides_no_protein(h5, tmp_path):
     cfg = Config.from_dict(base_config(h5, tmp_path, inputs=_h5_inputs(h5["h5ad"], protein=False, guide_obs=False),
                                        columns={"cell_id": "obs_names", "guide": None, "moi": None, "rna_total_counts": "UMI_count"},
                                        alignment={"required": ["rna", "metadata"]}, perturbation={"assignment": {"source": "auto"}}, umap={"enabled": False},
-                                       analysis={"clustering": {"enrichment": {"n_permutations": 20}}}))
+                                       analysis={"clustering": {"enrichment": {"n_permutations": 20}}, "perturbation_effects": {"enabled": False}}))
     ci = adapters.load_inputs(cfg)
     assert ci.protein_counts is None and ci.protein_normalized is None and ci.guide_assignments is None
     assert ci.rna.state == "raw_counts" and ci.metadata.shape[0] == 300 and "condition" in ci.metadata.columns

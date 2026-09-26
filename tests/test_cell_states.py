@@ -66,8 +66,9 @@ def test_config_defaults_and_validation():
     c = Config.from_dict({"inputs": {"rna": {"file": "x"}}})
     cl = c.analysis.clustering
     assert cl.enabled is True and cl.key == "leiden" and cl.resolution == 1.0 and cl.n_iterations == 2
-    assert cl.enrichment.control == "non_targeting" and cl.enrichment.stratify_by is None
-    for bad in ({"resolution": -1}, {"n_iterations": 0}, {"key": " "}, {"enrichment": {"control": "everything"}}, {"enrichment": {"fdr_alpha": 1.5}}):
+    # reference defaults: both arms computed, 'other' drives the calls
+    assert cl.enrichment.controls == ["ntc", "other"] and cl.enrichment.primary_control == "other" and cl.enrichment.stratify_by is None
+    for bad in ({"resolution": -1}, {"n_iterations": 0}, {"key": " "}, {"enrichment": {"controls": ["everything"]}}, {"enrichment": {"primary_control": "ntc", "controls": ["other"]}}, {"enrichment": {"fdr_alpha": 1.5}}):
         with pytest.raises(ConfigError):
             Config.from_dict({"inputs": {"rna": {"file": "x"}}, "analysis": {"clustering": bad}})
 
@@ -131,64 +132,91 @@ def enr():
     return a, compute_cluster_enrichment(a, cfg(), "leiden")
 
 
+def _arm(r, control="ntc"):
+    return r.table[r.table["control"] == control].set_index(["target", "cluster"])
+
+
 def test_fisher_table_orientation(enr):
     a, r = enr
-    row = r.table.set_index(["target", "cluster"]).loc[("EN", "0")]
+    row = _arm(r, "ntc").loc[("EN", "0")]
     obs = a.obs
     tm = (obs["target"] == "EN") & (obs["perturbation_class"] == "single_targeting")
     cm = obs["perturbation_class"] == "single_control"
     ink = obs["leiden"].astype(str) == "0"
     A, B, C, D = int((tm & ink).sum()), int((tm & ~ink).sum()), int((cm & ink).sum()), int((cm & ~ink).sum())
-    assert (row["n_target_in_cluster"], row["n_target_total"], row["n_control_in_cluster"], row["n_control_total"]) == (A, A + B, C, C + D)
+    assert (row["n_in_cluster"], row["n_target_cells"], row["n_reference_in_cluster"], row["n_reference_cells"]) == (A, A + B, C, C + D)
     orr, p = stats.fisher_exact([[A, B], [C, D]])
-    assert np.isclose(row["odds_ratio"], orr) and np.isclose(row["p_value"], p) and np.isclose(row["odds_ratio"], A * D / (B * C))
-    assert np.isclose(row["log2_or_haldane"], haldane_log2_or(A, B, C, D))
+    assert np.isclose(row["pval"], p) and np.isclose(row["pval_fisher"], p) and np.isclose(row["sample_odds_ratio"], orr)
+    # reference: the reported odds ratio is Haldane-Anscombe corrected, finite at zero counts
+    assert np.isclose(row["odds_ratio"], (A + .5) * (D + .5) / ((B + .5) * (C + .5))) and np.isclose(row["log2_odds_ratio"], haldane_log2_or(A, B, C, D))
+    assert np.isclose(row["pct_of_target"], 100 * A / (A + B)) and np.isclose(row["pct_of_reference"], 100 * C / (C + D))
 
 
 def test_known_enrichment_depletion_and_null(enr):
     _, r = enr
-    t = r.table.set_index(["target", "cluster"])
+    t = _arm(r, "other")  # primary arm (reference default) drives significance
     assert t.loc[("EN", "0"), "direction"] == "enriched" and t.loc[("EN", "0"), "significant"]
-    assert t.loc[("DE", "1"), "direction"] == "depleted" and t.loc[("DE", "1"), "significant"] and t.loc[("DE", "1"), "odds_ratio"] == 0
-    assert np.isfinite(t.loc[("DE", "1"), "log2_or_haldane"])
-    assert not t.loc["NU"]["significant"].any()
+    assert t.loc[("DE", "1"), "direction"] == "depleted" and t.loc[("DE", "1"), "significant"] and t.loc[("DE", "1"), "n_in_cluster"] == 0
+    assert np.isfinite(t.loc[("DE", "1"), "log2_odds_ratio"]) and t.loc[("DE", "1"), "sample_odds_ratio"] == 0
+    ntc = _arm(r, "ntc")
+    assert not ntc["significant"].any()  # significance is only ever called under the primary arm
+    assert (ntc["fdr"] < 0.05).loc[("EN", "0")] and (ntc["fdr"] < 0.05).loc[("DE", "1")]  # ... but the ntc arm's own FDR is reported
+    assert (ntc.loc["NU"]["fdr"] > 0.05).all()  # a null target is not called against the non-targeting cells
+    # under the reference 'other' arm the null target IS shifted relative to the other (strongly shifted) targets: that is the
+    # documented property of the leave-one-target-out reference, not an error
+    assert t.loc[("NU", "0"), "direction"] == "depleted"
 
 
 def test_bh_family_and_counts(enr):
-    _, r = enr
-    assert len(r.table) == 3 * 3 and r.info["n_tests"] == 9
-    np.testing.assert_allclose(r.table["fdr"].to_numpy(), bh_fdr(r.table["p_value"].to_numpy()))
-    assert r.info["bh_family"].startswith("all tested")
-    assert "p_permutation" in r.info["omnibus"]
+    a, r = enr
+    assert len(r.table) == 2 * 3 * 3 and r.info["n_tests_per_control"] == 9 and r.controls_used == ["ntc", "other"] and r.primary_control == "other"
+    for arm in ("ntc", "other"):
+        sub = r.table[r.table["control"] == arm]
+        np.testing.assert_allclose(sub["fdr"].to_numpy(), bh_fdr(sub["pval"].to_numpy()))  # BH within each arm
+    assert "p_permutation" in r.omnibus and 0 < r.omnibus["p_permutation"] <= 1
+    assert set(r.composition.index) == {"EN", "DE", "NU"} and list(r.composition.columns) == ["0", "1", "2"]
+    np.testing.assert_allclose(r.composition.sum(axis=1), 100.0)
+    assert set(r.reference_composition) == {"ntc", "other"} and np.isclose(r.reference_composition["ntc"].sum(), 100.0)
+    m = r.effect_magnitude.set_index("target")
+    # shift = total variation distance from the PRIMARY reference ('other' = the other targets, themselves shifted)
+    assert m.loc["EN", "n_significant_clusters"] >= 1 and (m["composition_shift_pct"] > 0).all()
+    ref = r.reference_composition["other"]
+    assert np.isclose(m.loc["EN", "composition_shift_pct"], (r.composition.loc["EN"] - ref).abs().sum() / 2)
+    ntc_only = compute_cluster_enrichment(a, cfg(enrichment={"controls": ["ntc"], "primary_control": "ntc"}), "leiden").effect_magnitude.set_index("target")
+    assert ntc_only.loc["EN", "composition_shift_pct"] > ntc_only.loc["NU", "composition_shift_pct"]  # against the non-targeting cells the null target barely moves
 
 
 def test_control_population_and_exclusions(enr):
     a, r = enr
-    t = r.table.set_index(["target", "cluster"])
-    assert (t["n_control_total"] == 300).all()  # only single-guide non-targeting cells
-    assert t.loc[("EN", "1"), "n_target_total"] == 90  # multi-guide 'EN;DE' cells never counted
+    t = _arm(r, "ntc")
+    assert (t["n_reference_cells"] == 300).all()  # only single-guide non-targeting cells
+    assert t.loc[("EN", "1"), "n_target_cells"] == 90  # multi-guide 'EN;DE' cells never counted
     b = a[~a.obs["perturbation_class"].isin(["ambiguous", "multi_targeting"])].copy()
     r2 = compute_cluster_enrichment(b, cfg(), "leiden")
-    pd.testing.assert_series_equal(r.table.set_index(["target", "cluster"])["p_value"].sort_index(), r2.table.set_index(["target", "cluster"])["p_value"].sort_index())
-    other = compute_cluster_enrichment(a, cfg(enrichment={"control": "other"}), "leiden").table.set_index(["target", "cluster"])
-    assert other.loc[("EN", "0"), "n_control_total"] == 180 and other.loc[("EN", "0"), "n_control_in_cluster"] < other.loc[("EN", "0"), "n_control_total"]
+    pd.testing.assert_series_equal(t["pval"].sort_index(), _arm(r2, "ntc")["pval"].sort_index())
+    other = _arm(r, "other")
+    assert other.loc[("EN", "0"), "n_reference_cells"] == 180 and other.loc[("EN", "0"), "n_reference_in_cluster"] < other.loc[("EN", "0"), "n_reference_cells"]
+    single = compute_cluster_enrichment(a, cfg(enrichment={"controls": ["ntc"], "primary_control": "ntc"}), "leiden")
+    assert single.controls_used == ["ntc"] and single.primary_control == "ntc" and single.table["significant"].any()
 
 
 def test_guide_support_direction(enr):
     a, r = enr
-    t = r.table.set_index(["target", "cluster"])
-    assert t.loc[("EN", "0"), "n_guides_observed"] == 3 and t.loc[("EN", "0"), "n_guides_supporting_direction"] == 2  # EN_3 is spread
-    assert t.loc[("DE", "1"), "n_guides_supporting_direction"] == 3  # depletion supported by guides below the control fraction
-    assert np.isclose(t.loc[("EN", "0"), "guide_support_fraction"], 2 / 3)
+    t = _arm(r, "other")
+    assert t.loc[("EN", "0"), "guides_tested"] == 3 and t.loc[("EN", "0"), "guides_concordant"] == 2  # EN_3 is spread
+    assert t.loc[("DE", "1"), "guides_concordant"] == 3  # depletion supported by guides below the reference fraction
+    assert np.isnan(t.loc[("NU", "2"), "guides_tested"])  # concordance is computed for the significant pairs only (reference)
 
 
 def test_stratification(enr):
     a, _ = enr
     r = compute_cluster_enrichment(a, cfg(enrichment={"stratify_by": "sample"}), "leiden")
-    t = r.table.set_index(["target", "cluster"])
-    assert {"cmh_odds_ratio", "cmh_p_value", "cmh_fdr", "cmh_n_strata"} <= set(r.table.columns)
-    assert t.loc[("EN", "0"), "cmh_n_strata"] == 2 and t.loc[("EN", "0"), "cmh_significant"]
-    assert np.isclose(t.loc[("EN", "0"), "p_value"], compute_cluster_enrichment(a, cfg(), "leiden").table.set_index(["target", "cluster"]).loc[("EN", "0"), "p_value"])  # Fisher result preserved
+    t = _arm(r, "other")
+    assert r.stratified and {"cmh_odds_ratio", "cmh_pval", "cmh_n_strata", "pval_fisher"} <= set(r.table.columns)
+    assert t.loc[("EN", "0"), "cmh_n_strata"] == 2 and t.loc[("EN", "0"), "significant"]
+    # reference: the CMH p-value replaces the pooled Fisher p-value; the Fisher value is kept beside it
+    assert np.isclose(t.loc[("EN", "0"), "pval"], t.loc[("EN", "0"), "cmh_pval"])
+    assert np.isclose(t.loc[("EN", "0"), "pval_fisher"], _arm(compute_cluster_enrichment(a, cfg(), "leiden"), "other").loc[("EN", "0"), "pval"])
     with pytest.raises(ValueError, match="not an obs column"):
         compute_cluster_enrichment(a, cfg(enrichment={"stratify_by": "lane_xyz"}), "leiden")
 
@@ -202,10 +230,11 @@ def test_small_targets_and_clusters_skipped(enr):
 
 
 def test_lochness_comparison_is_descriptive(enr):
-    a, _ = enr
+    from petrubseq_protein.analysis.cluster_enrichment import compare_with_lochness
+
+    a, r0 = enr
     loch = pd.DataFrame({"target": ["EN", "DE", "NU"], "mean_lochness_in_own_cells": [1.0, 0.2, 0.0], "delta_own_vs_control": [1.1, 0.3, 0.0], "fdr": [0.01, 0.2, 0.9]})
-    r = compute_cluster_enrichment(a, cfg(), "leiden", loch)
-    c = r.lochness_comparison.set_index("target")
+    c = compare_with_lochness(r0, loch).set_index("target")
     assert c.loc["EN", "top_enriched_cluster"] == "0" and c.loc["EN", "lochness_own_mean"] == 1.0
     assert not any("combined" in col for col in c.columns)
 
@@ -219,9 +248,9 @@ def synth(tmp_path_factory):
 def test_pipeline_disabled_adds_nothing(synth, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
-    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}})))
+    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}, "perturbation_effects": {"enabled": False}})))
     assert "leiden" not in r.adata.obs and "analysis" not in r.adata.uns["petrubseq_protein"]
-    assert not (tmp_path / "tables" / "cell_states").exists() and "Cell states and perturbation enrichment" not in r.report_html.read_text()
+    assert not (tmp_path / "tables" / "cell_states").exists() and "Perturbation enrichment across clusters" not in r.report_html.read_text()
 
 
 def test_pipeline_enabled(synth, tmp_path):
@@ -229,7 +258,7 @@ def test_pipeline_enabled(synth, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
     cl = {"resolution": 0.5, "enrichment": {"n_permutations": 20, "stratify_by": "condition"}}
-    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, analysis={"clustering": cl})))
+    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, analysis={"clustering": cl, "perturbation_effects": {"enabled": False}})))
     a = ad.read_h5ad(next((tmp_path / "processed").glob("*.h5ad")))
     assert a.obs["leiden"].dtype.name == "category" and a.obs["leiden"].nunique() >= 1
     info = a.uns["petrubseq_protein"]["analysis"]["cell_states"]
@@ -239,11 +268,13 @@ def test_pipeline_enabled(synth, tmp_path):
     if info["enrichment"].get("status") == "computed":
         assert (td / "perturbation_cluster_enrichment.csv").is_file() and "perturbation_cluster_enrichment" in a.uns
     man = pd.read_csv(tmp_path / "tables" / "figure_manifest.csv")
-    assert set(man.loc[man["section"] == "cell_states", "name"]) >= {"umap_leiden", "cluster_composition"}
+    assert set(man.loc[man["section"] == "cell_states", "name"]) >= {"umap_clusters", "cluster_composition", "umap_target_gene", "umap_qc_metrics"}
     html = r.report_html.read_text()
-    assert "6. Cell states and perturbation enrichment" in html and "7. Outputs and provenance" in html and html.count('src="figures/') == 0
+    assert "3. Clustering analysis" in html and "Outputs and provenance" in html and html.count('src="figures/') == 0
+    if info["enrichment"].get("status") == "computed":
+        assert "Perturbation enrichment across clusters" in html and "enrichment_heatmap" in set(man["name"])
     md = (tmp_path / "report.md").read_text()
-    assert "Cell states and perturbation enrichment" in md
+    assert "Clustering analysis" in md
 
 
 def test_pipeline_both_analyses_numbering(synth, tmp_path):
@@ -252,8 +283,11 @@ def test_pipeline_both_analyses_numbering(synth, tmp_path):
     an = {"clustering": {"enabled": True, "enrichment": {"n_permutations": 0}}, "perturbation_effects": {"enabled": True, "lochness": {"n_permutations": 5}, "modules": {"min_perturbations": 3, "min_cells_per_perturbation": 10}}}
     r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, umap={"enabled": False}, analysis=an)))
     html = r.report_html.read_text()
-    assert "6. Perturbation effects" in html and "7. Cell states and perturbation enrichment" in html and "8. Outputs and provenance" in html
-    assert "ps_scores" in r.adata.obsm and "leiden" in r.adata.obs
+    # reference section order: QC, clustering, perturbation strength, enrichment, PS, lochNESS, modules, then the protein extension
+    order = [html.index(f'<h2 id="{k}">') for k in ("qc", "clustering", "strength", "ps", "lochness", "protein-qc", "protein-effects", "concordance", "outputs")]
+    assert order == sorted(order)
+    assert "Perturbation strength" in html and "Per-cell perturbation response" in html
+    assert "ps_scores" in r.adata.obsm and "leiden" in r.adata.obs and "perturbation_strength" in r.adata.uns
 
 
 def test_depth_flag(blobs):
