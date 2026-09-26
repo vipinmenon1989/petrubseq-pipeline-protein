@@ -75,12 +75,36 @@ def read_h5ad_matrix(path: str | Path, slot: str = "X", key: Optional[str] = Non
     return extract(a, slot, key, str(path), feature_type_column)
 
 
-def guide_lists_from_obs(a: ad.AnnData, key: str, sep: str, source: str) -> pd.Series:
-    if key not in a.obs.columns:
-        raise InputError(f"{source}: obs[{key!r}] not found; columns: {list(a.obs.columns)[:12]} ...")
-    col = a.obs[key].astype(str).replace({"nan": "", "None": ""}).fillna("")
+def read_h5ad_obs(path: str | Path, cell_id: Optional[str] = None) -> pd.DataFrame:
+    """``obs`` of an h5ad as a cell table (only obs is read). ``cell_id`` may name an
+    obs column to use as the index; otherwise ``obs_names`` are the cell IDs."""
+    import h5py
+    from anndata.io import read_elem
+
+    path = Path(path)
+    if not path.is_file():
+        raise InputError(f"not a file: {path}")
+    with h5py.File(path, "r") as f:
+        obs = read_elem(f["obs"])
+    obs = obs.copy()
+    for c in obs.columns:
+        if obs[c].dtype.name == "category":
+            obs[c] = obs[c].astype(str)
+    if cell_id and cell_id in obs.columns:
+        obs = obs.set_index(obs[cell_id].astype(str))
+    obs.index = obs.index.astype(str)
+    obs.index.name = cell_id or "obs_names"
+    return obs
+
+
+def guide_lists_from_obs(a, key: str, sep: str, source: str) -> pd.Series:
+    obs = a if isinstance(a, pd.DataFrame) else a.obs
+    if key not in obs.columns:
+        raise InputError(f"{source}: obs[{key!r}] not found; columns: {list(obs.columns)[:12]} ...")
+    col = obs[key].astype(str).replace({"nan": "", "None": ""}).fillna("")
     lists = col.map(lambda v: [g.strip() for g in v.split(sep) if g.strip()] if v else [])
     lists.index = lists.index.astype(str)
+    lists.name = key
     return lists
 
 

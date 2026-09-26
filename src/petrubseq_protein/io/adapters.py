@@ -341,7 +341,11 @@ def load_inputs(cfg: Config, max_cells: Optional[int] = None) -> CanonicalInput:
     meta = None
     if cfg.inputs.metadata.file:
         t = cfg.inputs.metadata
-        meta = pio.read_table(cfg.resolve(t.file), t.format, t.sep, index_col=cfg.columns.cell_id)
+        if t.format == "h5ad":
+            from .h5ad import read_h5ad_obs
+            meta = read_h5ad_obs(cfg.resolve(t.file), cfg.columns.cell_id)
+        else:
+            meta = pio.read_table(cfg.resolve(t.file), t.format, t.sep, index_col=cfg.columns.cell_id)
         meta.index = meta.index.astype(str)
         logger.info("metadata: %d cells x %d columns", *meta.shape)
         prov["modalities"]["metadata"] = {"format": t.format, "source": Path(t.file).name}
@@ -368,8 +372,12 @@ def load_inputs(cfg: Config, max_cells: Optional[int] = None) -> CanonicalInput:
         g = cfg.inputs.guide_assignments
         if guides is not None:
             raise ConfigError("guide assignments are given both in inputs.multiplexed.slots and inputs.guide_assignments")
-        guides = pio.read_guide_assignments(cfg.resolve(g.file), g.cell_column, g.guides_column, g.list_separator, g.format, g.sep)
-        prov["modalities"]["guide_assignments"] = {"format": g.format, "source": Path(g.file).name, "state": "assignments"}
+        if g.format == "h5ad":
+            from .h5ad import guide_lists_from_obs, read_h5ad_obs
+            guides = guide_lists_from_obs(read_h5ad_obs(cfg.resolve(g.file)), g.guides_column, g.list_separator, str(cfg.resolve(g.file)))
+        else:
+            guides = pio.read_guide_assignments(cfg.resolve(g.file), g.cell_column, g.guides_column, g.list_separator, g.format, g.sep)
+        prov["modalities"]["guide_assignments"] = {"format": g.format, "source": Path(g.file).name + (f" obs[{g.guides_column!r}]" if g.format == "h5ad" else ""), "state": "assignments"}
     if guides is not None:
         logger.info("guide assignments: %d cells", len(guides))
     emb = None

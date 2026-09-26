@@ -205,11 +205,11 @@ parameter with no principled default, so it is left to the analysis phase.
 | `protein.min_cells_per_target` / `min_control_cells` / `fdr_alpha` | 10 / 10 / 0.05 | same support rule as PS |
 | `concordance.min_cells` / `fdr_alpha` | 20 / 0.05 | minimum cells for a within-target Spearman correlation |
 
-## Cell states and perturbation × cluster enrichment (`analysis.clustering`, Stage F; off by default)
+## Cell states and perturbation × cluster enrichment (`analysis.clustering`; on by default)
 
 | key | default | rationale |
 |---|---|---|
-| `enabled` | `false` | opt-in; preprocessing and Stage E are unchanged without it |
+| `enabled` | `true` | part of the standard run; `false` skips clustering and enrichment (the SCP1064 regression configs do, so that the frozen v0.1 reference stays comparable) |
 | `key` | `leiden` | obs column for the labels; an existing column is an error unless `overwrite: true` |
 | `resolution` | 1.0 | reference (weili-lab/perturbseq-pipeline) default; results are conditional on it |
 | `n_iterations` | 2 | reference; `-1` iterates until convergence |

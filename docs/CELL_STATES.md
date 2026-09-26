@@ -1,7 +1,8 @@
 # Cell states and perturbation × cluster enrichment (Stage F)
 
-Enabled with `analysis.clustering.enabled: true` (default **off**;
-`config/demo_papalexi.yaml` enables it). Runs as the stage "cell states and
+Part of the standard run (`analysis.clustering.enabled`, default **on**; the
+SCP1064 regression configs set it to `false` to keep the frozen v0.1 reference
+comparable). Runs as the stage "cell states and
 perturbation enrichment" after the representations. It is independent of the
 perturbation-effect analyses (`docs/PERTURBATION_EFFECTS.md`): none of them uses
 the clusters. Reference audit: `docs/reference/CLUSTERING_ENRICHMENT_AUDIT.md`.

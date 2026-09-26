@@ -173,7 +173,7 @@ def test_report_html_is_self_contained(filtered_run):
     assert n_embedded == sum(r.in_report for r in filtered_run.registry.records) > 0
     assert 'src="figures/' not in html
     assert not re.search(r'src="(?!data:)', html)
-    for section in ("Run summary", "1. Inputs and modality audit", "2. Cell and RNA QC", "3. Protein QC", "4. Perturbation QC", "5. Representations", "6. Outputs and provenance", "Filtering steps"):
+    for section in ("Run summary", "1. Inputs and modality audit", "2. Cell and RNA QC", "3. Protein QC", "4. Perturbation QC", "5. Representations", "6. Cell states and perturbation enrichment", "7. Outputs and provenance", "Filtering steps"):
         assert section in html, section
     assert "n_top_genes: 50" in html  # resolved config embedded
     assert "rna_min_genes" in html and "prefilter_min_genes" in html

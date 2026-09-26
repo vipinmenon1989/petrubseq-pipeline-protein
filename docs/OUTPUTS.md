@@ -43,7 +43,7 @@ diagnostics · 18 processed h5ad · 19 tables · 20 figure manifest · 21 report
 "perturbation effects" stage runs after the cross-modality diagnostics (24 stages) and the
 report gains section 6 *Perturbation effects* (PS, lochNESS, gene programs and modules,
 protein effects, RNA–protein concordance, integrated summary). With
-`analysis.clustering.enabled` a "cell states and perturbation enrichment" stage follows
+`analysis.clustering.enabled` (the default) a "cell states and perturbation enrichment" stage follows
 (one more stage) and the report gains the section *Cell states and perturbation
 enrichment*; section numbers shift so that *Outputs and provenance* stays last.
 
@@ -66,7 +66,7 @@ enrichment*; section numbers shift so that *Outputs and provenance* stays last.
 | `rna_gene_qc.csv` | per gene: mt/ribo flags, detection, HVG columns |
 | `figure_manifest.csv` | section, stage, name, title, caption, in_report, path for every figure |
 | `run_summary.csv` | headline numbers of the run |
-| `cell_states/*.csv` | Stage F only: `cluster_summary`, `cluster_composition_by_class`, `cluster_composition_by_target`, `cluster_composition_by_<sample/lane/batch/...>`, `perturbation_cluster_enrichment`, `cluster_enrichment_vs_lochness`, `cluster_enrichment_skipped` (columns: docs/CELL_STATES.md) |
+| `cell_states/*.csv` | every run with `analysis.clustering.enabled` (default): `cluster_summary`, `cluster_composition_by_class`, `cluster_composition_by_target`, `cluster_composition_by_<sample/lane/batch/...>`, `perturbation_cluster_enrichment`, `cluster_enrichment_vs_lochness`, `cluster_enrichment_skipped` (columns: docs/CELL_STATES.md) |
 | `perturbation_effects/*.csv` | Stage E only: `ps_targets`, `ps_skipped`, `ps_signatures`, `lochness_targets`, `lochness_skipped`, `lochness_by_sample`, `perturbation_effect_matrix`, `perturbation_de_mask`, `gene_programs`, `perturbation_modules`, `module_program_strength`, `perturbation_program_effects`, `protein_effects`, `protein_effect_matrix`, `ps_protein_association`, `lochness_protein_association`, `lochness_protein_summary`, `program_protein_association_cells`, `program_protein_association_targets`, `perturbation_summary` (columns: docs/PERTURBATION_EFFECTS.md) |
 
 ## Figures
@@ -82,7 +82,7 @@ Before/after pairs (same drawing code, `stage` differs; thresholds drawn dashed)
 | representations_rna | `rna_pca_variance`, `rna_pc_vs_depth`, `rna_umap_<color>`, `provided_embedding_<color>` | representation |
 | representations_protein | `protein_pca_variance`, `protein_pca_loadings`, `protein_pc_vs_depth`, `protein_umap_<color>` | representation |
 | multimodal | `knn_overlap`, `multimodal_umap_<color>` (when enabled) | representation |
-| cell_states | `umap_leiden`, `cluster_composition` (stage `clusters`); `perturbation_cluster_enrichment` (`enrichment`) | only with `analysis.clustering.enabled` |
+| cell_states | `umap_leiden`, `cluster_composition` (stage `clusters`); `perturbation_cluster_enrichment` (`enrichment`) | `analysis.clustering.enabled` (default on) |
 | perturbation_effects | `ps_target_median`, `ps_distributions` (stage `ps`); `lochness_targets`, `lochness_umap` (`lochness`); `perturbation_program_heatmap`, `effect_matrix_programs`, `module_program_strength` (`gene_programs`); `protein_effect_heatmap` (`protein_effects`); `ps_vs_protein`, `program_activity_vs_protein`, `rna_vs_protein_effects`, `perturbation_overview` (`concordance`) | only with `analysis.perturbation_effects.enabled` |
 
 ## report.html

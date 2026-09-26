@@ -248,7 +248,7 @@ def synth_raw(tmp_path_factory):
 def test_pipeline_disabled_adds_nothing(synth_raw, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
-    a = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, umap={"enabled": False}))).adata
+    a = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}}))).adata
     assert "analysis" not in a.uns["petrubseq_protein"] and "ps_scores" not in a.obsm and "ps_score" not in a.obs
     assert not (tmp_path / "tables" / "perturbation_effects").exists()
 
@@ -257,7 +257,7 @@ def test_pipeline_enabled_end_to_end(synth_raw, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
     pe = {"enabled": True, "lochness": {"n_permutations": 20}, "modules": {"min_cells_per_perturbation": 10, "min_perturbations": 3, "n_programs": 2}, "ps": {"min_cells_per_target": 10}}
-    r = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, analysis={"perturbation_effects": pe})))
+    r = run_pipeline(Config.from_dict(base_config(synth_raw, tmp_path, analysis={"perturbation_effects": pe, "clustering": {"enabled": False}})))
     a = ad.read_h5ad(next((tmp_path / 'processed').glob('*.h5ad')))
     info = a.uns["petrubseq_protein"]["analysis"]["perturbation_effects"]
     assert info["ps"]["n_targets_scored"] >= 1 and "k_used" in info["lochness"]

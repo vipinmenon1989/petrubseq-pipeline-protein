@@ -65,7 +65,7 @@ def labelled(seed: int = 0) -> ad.AnnData:
 def test_config_defaults_and_validation():
     c = Config.from_dict({"inputs": {"rna": {"file": "x"}}})
     cl = c.analysis.clustering
-    assert cl.enabled is False and cl.key == "leiden" and cl.resolution == 1.0 and cl.n_iterations == 2
+    assert cl.enabled is True and cl.key == "leiden" and cl.resolution == 1.0 and cl.n_iterations == 2
     assert cl.enrichment.control == "non_targeting" and cl.enrichment.stratify_by is None
     for bad in ({"resolution": -1}, {"n_iterations": 0}, {"key": " "}, {"enrichment": {"control": "everything"}}, {"enrichment": {"fdr_alpha": 1.5}}):
         with pytest.raises(ConfigError):
@@ -219,15 +219,16 @@ def synth(tmp_path_factory):
 def test_pipeline_disabled_adds_nothing(synth, tmp_path):
     from petrubseq_protein.pipeline import run_pipeline
 
-    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, umap={"enabled": False})))
+    r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, umap={"enabled": False}, analysis={"clustering": {"enabled": False}})))
     assert "leiden" not in r.adata.obs and "analysis" not in r.adata.uns["petrubseq_protein"]
     assert not (tmp_path / "tables" / "cell_states").exists() and "Cell states and perturbation enrichment" not in r.report_html.read_text()
 
 
 def test_pipeline_enabled(synth, tmp_path):
+    """Clustering runs by default; here with explicit settings and stratification."""
     from petrubseq_protein.pipeline import run_pipeline
 
-    cl = {"enabled": True, "resolution": 0.5, "enrichment": {"n_permutations": 20, "stratify_by": "condition"}}
+    cl = {"resolution": 0.5, "enrichment": {"n_permutations": 20, "stratify_by": "condition"}}
     r = run_pipeline(Config.from_dict(base_config(synth, tmp_path, analysis={"clustering": cl})))
     a = ad.read_h5ad(next((tmp_path / "processed").glob("*.h5ad")))
     assert a.obs["leiden"].dtype.name == "category" and a.obs["leiden"].nunique() >= 1

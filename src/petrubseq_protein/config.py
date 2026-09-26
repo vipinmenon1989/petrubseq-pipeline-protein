@@ -94,7 +94,9 @@ class MatrixInput:
 @dataclass
 class TableInput:
     file: Optional[str] = None
-    #: ``scp_metadata`` (second line is a TYPE row), ``csv``, ``tsv``, ``auto``.
+    #: ``scp_metadata`` (second line is a TYPE row), ``csv``, ``tsv``, ``auto``, or
+    #: ``h5ad``: ``file`` is an AnnData whose ``obs`` is the table (rows = cells;
+    #: ``columns.cell_id`` may name an obs column, otherwise ``obs_names`` are used).
     format: str = "auto"
     sep: str = "auto"
     required: bool = True
@@ -102,7 +104,9 @@ class TableInput:
 
 @dataclass
 class GuideAssignmentInput:
-    """Per-cell list of assigned guides (upstream guide calling already done)."""
+    """Per-cell list of assigned guides (upstream guide calling already done).
+    ``format: h5ad``: ``file`` is an AnnData and ``guides_column`` an obs column
+    holding the guide(s) per cell, ``list_separator``-joined."""
 
     file: Optional[str] = None
     format: str = "auto"
@@ -694,10 +698,12 @@ class ClusterEnrichmentConfig:
 
 @dataclass
 class ClusteringConfig:
-    """Stage F: Leiden clustering of the RNA neighbour graph plus perturbation x
-    cluster enrichment. Off by default; independent of ``perturbation_effects``."""
+    """Leiden clustering of the RNA neighbour graph plus perturbation x cluster
+    enrichment. Part of the standard run (on by default); independent of
+    ``perturbation_effects``. Set ``enabled: false`` to skip (the SCP1064
+    regression configs do, to keep their historical output)."""
 
-    enabled: bool = False
+    enabled: bool = True
     #: obs column for the cluster labels
     key: str = "leiden"
     #: Leiden resolution (higher -> more clusters); reference default 1.0

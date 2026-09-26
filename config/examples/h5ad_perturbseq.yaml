@@ -1,0 +1,46 @@
+# Perturb-seq from an existing AnnData (no protein): RNA in X or a layer, guide
+# UMI counts in obsm, cell metadata and (optionally) an upstream guide call in obs.
+# Every input names the same file; each modality is read from its slot.
+
+dataset:
+  name: my_perturbseq
+  input_dir: ${DATA_ROOT}/my_perturbseq
+
+inputs:
+  rna:
+    format: h5ad
+    file: screen.h5ad
+    slot: layers                 # X | layers | obsm
+    key: counts                  # layer name (omit for slot: X)
+    state: raw_counts            # raw_counts | normalized | auto (detected from the values)
+  guide_counts:
+    format: h5ad
+    file: screen.h5ad
+    slot: obsm
+    key: guide_counts            # obsm DataFrame (columns = guide IDs) or array + uns['guide_counts_features']
+  protein:
+    required: false              # no protein in this experiment
+  metadata:
+    file: screen.h5ad
+    format: h5ad                 # obs is the cell table; cells are obs_names
+  # optional: an upstream guide call kept in obs (then set perturbation.assignment.source)
+  # guide_assignments: {file: screen.h5ad, format: h5ad, guides_column: guide_call, list_separator: ";"}
+
+columns:
+  cell_id: obs_names
+  condition: condition           # obs columns
+  sample: sample
+
+alignment:
+  required: [rna, metadata]
+
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)_(?P<index>\\d+)$"
+  control_classes: {non_targeting: ["^NTC$", "^NT$"]}
+  assignment: {source: auto, method: dominant}   # guide counts only -> called with the dominant rule
+
+analysis:
+  perturbation_effects: {enabled: true}          # clustering + enrichment run by default
+
+output:
+  dir: ${RESULTS_ROOT}/my_perturbseq

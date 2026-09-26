@@ -51,7 +51,7 @@ Stage E adds, only when `analysis.perturbation_effects.enabled` (docs/PERTURBATI
 `ps_quadrant` (successful_knockdown / escaper / non_responder / low_signal / not_applicable) and
 `lochness_self` (each cell's lochNESS for its own label, including the control label).
 
-Stage F adds, only when `analysis.clustering.enabled`: `obs[analysis.clustering.key]`
+Clustering (`analysis.clustering`, on by default) adds `obs[analysis.clustering.key]`
 (default `leiden`), the categorical Leiden cluster of every cell on the RNA neighbour
 graph (numbered states, not cell types; docs/CELL_STATES.md).
 

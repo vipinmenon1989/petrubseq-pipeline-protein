@@ -240,6 +240,8 @@ def write_h5ad_slots(d: Dict[str, object], path: Path, guide_obs: bool = True) -
     a.obsm["protein_counts"] = pd.DataFrame(np.asarray(d["protein_counts"]).astype(np.float32), index=a.obs_names, columns=list(d["protein_cols"]))  # type: ignore[arg-type]
     a.obsm["guide_counts"] = sp.csr_matrix(np.asarray(d["guide_counts"]).astype(np.float32))
     a.uns["guide_counts_features"] = list(d["guides"])  # type: ignore[arg-type]
+    a.obs["condition"] = list(d["condition"])  # type: ignore[arg-type]
+    a.obs["UMI_count"] = np.asarray(d["total"]).astype(float)
     if guide_obs:
         a.obs["guides"] = [";".join(l) for l in d["lists"]]  # type: ignore[union-attr]
     a.write_h5ad(path)

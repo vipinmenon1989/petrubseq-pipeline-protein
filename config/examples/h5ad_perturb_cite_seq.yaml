@@ -1,0 +1,56 @@
+# Perturb-CITE-seq from an existing AnnData: RNA in X (log-normalized here),
+# raw ADT counts in obsm, guide counts in obsm, upstream guide calls and cell
+# metadata in obs. Each modality is read from its own slot of the same file.
+
+dataset:
+  name: my_perturb_cite
+  input_dir: ${DATA_ROOT}/my_perturb_cite
+
+inputs:
+  rna:
+    format: h5ad
+    file: screen.h5ad
+    slot: X
+    state: normalized            # X holds log-normalized values; a count layer would be slot: layers, key: counts
+  protein_counts:
+    format: h5ad
+    file: screen.h5ad
+    slot: obsm
+    key: protein_counts          # obsm DataFrame (columns = antibody names) or array + uns['protein_counts_features']
+    required: false
+  protein:
+    required: true               # a protein representation must exist: the ADT counts satisfy it (CLR is computed)
+  guide_counts:
+    format: h5ad
+    file: screen.h5ad
+    slot: obsm
+    key: guide_counts
+  guide_assignments:
+    file: screen.h5ad
+    format: h5ad
+    guides_column: guide_call    # obs column, several guides joined by list_separator
+    list_separator: ";"
+  metadata:
+    file: screen.h5ad
+    format: h5ad
+
+columns:
+  cell_id: obs_names
+  condition: condition
+  sample: sample
+
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)_(?P<index>\\d+)$"
+  control_classes: {non_targeting: ["^NTC$", "^NT$"]}
+  assignment:
+    source: provided             # both exist: the obs call drives the assignment, counts feed diagnostics and a comparison
+
+protein:
+  isotype_patterns: ["IgG"]
+  feature_table: null            # optional antibody annotation csv
+
+analysis:
+  perturbation_effects: {enabled: true}
+
+output:
+  dir: ${RESULTS_ROOT}/my_perturb_cite

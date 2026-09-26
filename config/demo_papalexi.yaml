@@ -6,7 +6,7 @@
 # Rebuilding the subset from the public GEO files (maintainers only):
 #   python demo/fetch_papalexi_data.py --dest ${DATA_ROOT}/ECCITE-seq
 #   python demo/prepare_papalexi_demo.py --source ${DATA_ROOT}/ECCITE-seq --output ${DATA_ROOT}/demo/papalexi_eccite
-# Processing uses the generic Stage C architecture (10x-style combined MTX read
+# Processing uses the generic input adapters (10x-style combined MTX read
 # once and split by feature type). Dataset facts: docs/datasets/PAPALEXI_ECCITE_AUDIT.md.
 # Every key not listed keeps the public default (docs/DEFAULTS.md).
 
@@ -98,8 +98,8 @@ output:
   dir: ${RESULTS_ROOT}/demo/papalexi_eccite
   h5ad_name: papalexi_eccite_demo_processed.h5ad
 
-# Stage E: perturbation-effect analyses (off by default in generic configs;
-# enabled here for the demo). Methods and references: docs/PERTURBATION_EFFECTS.md.
+# Perturbation-effect analyses (opt-in; enabled for the demo). Methods and
+# references: docs/PERTURBATION_EFFECTS.md.
 analysis:
   perturbation_effects:
     enabled: true
@@ -128,8 +128,8 @@ analysis:
       min_cells_per_target: 10
     concordance:
       min_cells: 20
-  # Stage F: Leiden cell states on the RNA neighbour graph and perturbation x
-  # cluster enrichment (off by default in generic configs).
+  # Leiden cell states on the RNA neighbour graph and perturbation x cluster
+  # enrichment (on by default; settings made explicit here). docs/CELL_STATES.md.
   clustering:
     enabled: true
     key: leiden

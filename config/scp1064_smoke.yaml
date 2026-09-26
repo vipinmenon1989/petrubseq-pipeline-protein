@@ -186,3 +186,12 @@ output:
   write_h5ad: true
   write_prefilter_h5ad: false   # before-filter figures + tables/cell_qc_prefilter.csv.gz cover this without a second object
   archive: false                # true -> <run>_results.tar.gz (report, figures, tables, logs; matrices excluded)
+
+analysis:
+  # Regression benchmark: the frozen v0.1 reference predates clustering and the
+  # perturbation-effect analyses, so both stay off here (they are on by default /
+  # opt-in respectively in new configs). Nothing numerical below this line.
+  clustering:
+    enabled: false
+  perturbation_effects:
+    enabled: false

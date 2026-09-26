@@ -2,8 +2,17 @@
 
 A reproducible Perturb-CITE-seq pipeline for RNA, CRISPR guide and
 optional ADT/protein measurements: input harmonization, QC, guide assignment,
-RNA/protein preprocessing, Leiden clustering, perturbation-response analysis,
-gene programs, protein effects and a self-contained report, in one command.
+RNA/protein preprocessing, Leiden clustering with perturbation × cluster
+enrichment, perturbation-response analysis, gene programs, protein effects and a
+self-contained report, in one command.
+
+```
+input → QC → guide assignment → RNA (+ protein) preprocessing → PCA / neighbours / UMAP
+      → Leiden clustering → perturbation × cluster enrichment
+      → PS → lochNESS → gene programs / perturbation modules
+      → protein effects → RNA–protein concordance   (both only when protein exists)
+      → report.html + processed .h5ad
+```
 
 ```bash
 petrubseq-protein run --config config/demo_papalexi.yaml
@@ -48,13 +57,14 @@ is given. Up to 3,000 HVGs, 50 PCs, 15-neighbour graph, UMAP. Protein: raw ADT
 counts kept, per-protein CLR across cells, isotypes used for QC and excluded from the
 protein PCA/UMAP; supplied normalized values preserved, never treated as counts.
 
-**5 · Cell states** *(optional, `analysis.clustering`)*. Leiden on the existing RNA
-graph (igraph backend, resolution 1.0, seeded); cluster sizes, composition by
-perturbation class / sample / lane, depth; flags for clusters dominated by one
-sample, by ambiguous cells or by library depth. **Perturbation × cluster
-enrichment**: Fisher exact test of each target's single-guide cells vs non-targeting
-controls per cluster, BH-FDR over all pairs, guide agreement per pair, optional
-Cochran–Mantel–Haenszel across a sample/lane column.
+**5 · Cell states and perturbation enrichment.** Leiden on the RNA neighbour graph
+(igraph backend, resolution 1.0, seeded); cluster sizes, composition by perturbation
+class / sample / lane, depth; flags for clusters dominated by one sample, by
+ambiguous cells or by library depth. **Perturbation × cluster enrichment**: Fisher
+exact test of each target's single-guide cells vs non-targeting controls per
+cluster, BH-FDR over all pairs, guide agreement per pair, optional Cochran–Mantel–
+Haenszel across a sample/lane column. Runs in every standard run
+(`analysis.clustering.enabled: false` skips it).
 
 **6 · Perturbation response** *(optional, `analysis.perturbation_effects`)*.
 **PS**: per-cell perturbation-response score (Song et al. 2025), max-normalized
@@ -132,8 +142,8 @@ To rebuild the subset from GEO (optional): `demo/fetch_papalexi_data.py`,
 | per-cell metadata (condition, sample, library size …) | required by default (`inputs.metadata.required: false` to drop) | `inputs.metadata`, `columns.*` |
 | per-lane sample sheet, antibody table, precomputed embedding | optional | `inputs.lane_metadata`, `protein.feature_table`, `inputs.embedding` |
 
-Formats: `dense_csv`, `mtx`, `10x_h5`, `h5ad` (slot-addressed). One config per
-layout in `config/examples/`. Start from the documented defaults:
+Formats: `dense_csv`, `mtx`, `10x_h5`, `h5ad`. One config per layout in
+`config/examples/`. Start from the documented defaults:
 
 ```bash
 petrubseq-protein init-config my_run.yaml
@@ -141,7 +151,11 @@ petrubseq-protein validate --config my_run.yaml     # config + every input exist
 petrubseq-protein audit --config my_run.yaml        # cell-ID overlap, value states, protein panel
 ```
 
-Minimal combined-10x config:
+### Option 1 — 10x / matrix input
+
+One combined feature-barcode matrix, read once and split by feature type
+(`config/examples/mtx_combined.yaml`; separate MTX/H5 directories per modality:
+`mtx_separate.yaml`; several lanes: `multilane.yaml`):
 
 ```yaml
 dataset:
@@ -165,10 +179,63 @@ output:
   dir: ${RESULTS_ROOT}/my_screen
 ```
 
+### Option 2 — existing `.h5ad`
+
+Each modality is read from a slot of the same AnnData; cell metadata and an
+upstream guide call come from `obs`. Perturb-seq, RNA + guide counts, no protein
+(`config/examples/h5ad_perturbseq.yaml`):
+
+```yaml
+inputs:
+  rna:          {format: h5ad, file: screen.h5ad, slot: layers, key: counts, state: raw_counts}
+  guide_counts: {format: h5ad, file: screen.h5ad, slot: obsm, key: guide_counts}
+  protein:      {required: false}
+  metadata:     {file: screen.h5ad, format: h5ad}        # obs is the cell table
+columns: {cell_id: obs_names, condition: condition, sample: sample}
+alignment: {required: [rna, metadata]}
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)_(?P<index>\\d+)$"
+  control_classes: {non_targeting: ["^NTC$"]}
+```
+
+Perturb-CITE-seq, RNA + guide counts + ADT counts, with the upstream guide call
+in `obs['guide_call']` driving the assignment
+(`config/examples/h5ad_perturb_cite_seq.yaml`):
+
+```yaml
+inputs:
+  rna:               {format: h5ad, file: screen.h5ad, slot: X, state: normalized}
+  protein_counts:    {format: h5ad, file: screen.h5ad, slot: obsm, key: protein_counts}
+  guide_counts:      {format: h5ad, file: screen.h5ad, slot: obsm, key: guide_counts}
+  guide_assignments: {file: screen.h5ad, format: h5ad, guides_column: guide_call, list_separator: ";"}
+  metadata:          {file: screen.h5ad, format: h5ad}
+columns: {cell_id: obs_names, condition: condition, sample: sample}
+perturbation:
+  assignment: {source: provided}    # counts are still loaded, compared and stored
+```
+
+| purpose | AnnData location | config |
+|---|---|---|
+| RNA expression | `X` or `layers[<key>]` | `inputs.rna: {slot: X}` or `{slot: layers, key: <key>}` |
+| RNA value state | – | `inputs.rna.state: raw_counts \| normalized \| auto` (auto = detected from the values) |
+| raw ADT counts / normalized protein | `obsm[<key>]` | `inputs.protein_counts` / `inputs.protein` with `{slot: obsm, key: <key>}` |
+| guide UMI counts | `obsm[<key>]` | `inputs.guide_counts: {slot: obsm, key: <key>}` |
+| feature names of an `obsm` matrix | DataFrame columns, or `uns['<key>_features']` for a plain array | automatic |
+| cell metadata | `obs` | `inputs.metadata: {file: <h5ad>, format: h5ad}`; `columns.cell_id: obs_names` or an obs column |
+| upstream guide / perturbation call | `obs[<column>]` | `inputs.guide_assignments: {format: h5ad, guides_column: <column>}` |
+| gene metadata | `var` | carried into the processed object |
+| precomputed embedding | – | `inputs.embedding` (CSV only) |
+
+One combined h5ad with a `var['feature_types']` column (as written by
+`scanpy.read_10x_mtx(gex_only=False)`) can instead be given as
+`inputs.multiplexed: {format: h5ad, path: …, feature_types: …}`, or with explicit
+`slots` (`config/examples/h5ad_slots.yaml`).
+
 RNA + guides only, no protein, no metadata: `inputs.protein.required: false`,
 `inputs.metadata.required: false`, `alignment.required: [rna]`. `${DATA_ROOT}` and
 `${RESULTS_ROOT}` default to `../data` and `../results` next to the repository.
-Every key, default and rationale: `docs/DEFAULTS.md`.
+Every key, default and rationale: `docs/DEFAULTS.md`; clustering, PS, lochNESS,
+programs and the protein analyses can each be switched off under `analysis:`.
 
 ---
 
@@ -217,7 +284,7 @@ designed answer. In addition:
 src/petrubseq_protein/   io (adapters, readers, tenx, h5ad) · validation · preprocessing (align, guides, normalize, embeddings)
                          · qc · analysis (clustering, cluster_enrichment, ps_score, lochness, modules, protein_effects, concordance)
                          · reporting (figures, plots, html, markdown) · pipeline · cli · config
-config/                  demo_papalexi.yaml · scp1064*.yaml · examples/
+config/                  demo_papalexi.yaml · scp1064*.yaml · examples/ (mtx, multilane, h5ad_perturbseq, h5ad_perturb_cite_seq, ...)
 demo/                    data/papalexi_eccite (bundled subset) · fetch/prepare/check scripts
 docs/                    DEFAULTS · OUTPUTS · PROCESSED_OBJECT · CELL_STATES · PERTURBATION_EFFECTS · REGRESSION · HPC · datasets/ · reference/
 scripts/                 validate_processed · compare_processed · compare_reference_perturbation
