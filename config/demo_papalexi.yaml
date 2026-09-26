@@ -129,6 +129,20 @@ analysis:
       min_cells_per_target: 10
     concordance:
       min_cells: 20
+    # Perturbation distance vs control and the pairwise distance space (reference stages
+    # 10-11; off by default in the reference, enabled here for the demo). Energy distance in
+    # X_pca, seeded 1000-permutation DistanceTest, BH-FDR; min_cells 30 (reference) leaves the
+    # 21 largest targets. docs/PERTURBATION_DISTANCE.md.
+    distance:
+      enabled: true
+      n_permutations: 1000               # reference default
+      min_cells: 30                      # reference default
+      random_seed: 123                   # reference default
+    distance_space:
+      enabled: true
+      n_modules: null                    # reference rule: max(2, min(9, K // 4)) -> 5 modules for 21 targets
+    master_table:
+      enabled: true                      # tables/master_perturbation_table.csv (+ the protein companion)
   # Leiden cell states on the RNA neighbour graph and perturbation x cluster
   # enrichment (reference stages; on by default). docs/CELL_STATES.md.
   clustering:

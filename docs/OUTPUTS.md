@@ -17,8 +17,9 @@ results/<run>/
 │   ├── representations_rna/  representations_protein/  multimodal/
 │   ├── cell_states/{clusters,enrichment,enrichment_per_target}/
 │   ├── perturbation_strength/{overview,per_target}/
-│   └── perturbation_effects/{gene_programs,gene_programs_umap,ps,ps_per_target,ps_lda,ps_lda_per_target,lochness,lochness_per_target,protein_effects,concordance}/
-├── tables/                          # CSV (cell-level tables gzipped); cell_states/, perturbation_strength/, perturbation_effects/ subfolders
+│   ├── perturbation_effects/{gene_programs,gene_programs_umap,ps,ps_per_target,ps_lda,ps_lda_per_target,lochness,lochness_per_target,protein_effects,concordance}/
+│   └── perturbation_distance/{distance,distance_space,distance_protein}/
+├── tables/                          # CSV (cell-level tables gzipped); cell_states/, perturbation_strength/, perturbation_effects/, perturbation_distance/ subfolders; master_perturbation_table.csv, master_perturbation_protein_table.csv
 ├── logs/  run.log  resolved_config.yaml  run_manifest.json
 └── <run>_results.tar.gz             # only with output.archive: true (matrices excluded)
 ```
@@ -71,7 +72,10 @@ numbering closes up when an analysis is disabled.
 | `run_summary.csv` | headline numbers of the run |
 | `cell_states/*.csv` | every run with `analysis.clustering.enabled` (default): `cluster_summary`, `cluster_composition_by_class`, `cluster_composition_by_target`, `cluster_composition_by_<sample/lane/batch/...>`, `perturbation_cluster_enrichment` (both arms), `enrichment` (reader view), `enrichment_composition`, `enrichment_reference_composition`, `enrichment_effect_magnitude`, `cluster_enrichment_vs_lochness`, `cluster_enrichment_skipped` (columns: docs/CELL_STATES.md) |
 | `perturbation_strength/*.csv` | `perturbation_full` (all columns, both arms), `perturbation` (reader view), `skipped` (docs/PERTURBATION_EFFECTS.md) |
-| `perturbation_effects/*.csv` | `ps_targets`, `ps_skipped`, `ps_signatures`, `ps_vs_perturbation`, `lochness_targets`, `lochness_by_cluster`, `lochness_skipped`, `lochness_by_sample`, `perturbation_effect_matrix`, `perturbation_de_mask`, `gene_programs`, `perturbation_modules`, `module_program_strength`, `perturbation_program_effects`, `program_activity_by_cluster`, `tf_hubs`, `tf_edges`, `module_connectivity`, `protein_effects`, `protein_effect_matrix`, `ps_protein_association`, `lochness_protein_association`, `lochness_protein_summary`, `program_protein_association_cells`, `program_protein_association_targets`, `perturbation_summary` (columns: docs/PERTURBATION_EFFECTS.md) |
+| `perturbation_effects/*.csv` | `ps_targets`, `ps_skipped`, `ps_signatures`, `ps_vs_perturbation`, `lochness_targets`, `lochness_by_cluster`, `lochness_skipped`, `lochness_by_sample`, `perturbation_effect_matrix`, `perturbation_de_mask`, `gene_programs`, `perturbation_modules`, `module_program_strength`, `perturbation_program_effects`, `program_activity_by_cluster`, `tf_hubs`, `tf_edges`, `module_connectivity`, `protein_effects`, `protein_effect_matrix`, `ps_protein_association`, `lochness_protein_association_cells`, `lochness_protein_association_targets`, `lochness_protein_summary`, `program_protein_association_cells`, `program_protein_association_targets`, `perturbation_summary` (columns: docs/PERTURBATION_EFFECTS.md) |
+| `perturbation_distance/*.csv` | with `analysis.perturbation_effects.distance` / `distance_space` enabled: `perturbation_distance` (target, n_cells, n_control, energy_distance, pvalue, mmd_distance, fdr, significant), `distance_skipped`, `perturbation_distance_matrix` (targets × targets), `perturbation_space_coordinates` (PCoA1..), `perturbation_neighbors` (target, neighbor, distance, rank), `phenotype_modules` (target, phenotype_module), `distance_space_skipped`; protein extension: `distance_protein_association`, `distance_protein_targets`, `phenotype_space_protein_mantel`, `phenotype_module_protein`, `phenotype_module_protein_means` (docs/PERTURBATION_DISTANCE.md) |
+| `master_perturbation_table.csv`, `master_perturbation_protein_table.csv` | one row per target (reference `perturbation_meta` columns, then the extension columns incl. `n_guides`, strongest gene program); one row per target × protein with a level column per statistic group (`protein_effect_level`, `ps_protein_level`, `lochness_protein_level`, `distance_protein_level`, `phenotype_module_protein_level`, `phenotype_geometry_protein_level`, `program_protein_level`, `target_columns_level`) |
+| `ps_protein_associations.csv`, `lochness_protein_associations.csv`, `distance_protein_associations.csv`, `phenotype_module_protein_associations.csv`, `rna_protein_geometry_concordance.csv` | the explicit analysis-level tables (CELL_LEVEL, CELL_LEVEL, TARGET_LEVEL, PHENOTYPE_MODULE_LEVEL, TARGET_PAIR_LEVEL), each with an `analysis_level` column (docs/RNA_PROTEIN_LEVELS.md) |
 
 ## Figures
 
@@ -89,6 +93,7 @@ Before/after pairs (same drawing code, `stage` differs; thresholds drawn dashed)
 | cell_states | `umap_clusters`, `umap_qc_metrics`, `umap_lane` / `umap_sample`, `umap_assignment_class`, `umap_target_gene`, `cluster_composition` (stage `clusters`); `enrichment_heatmap`, `enrichment_phenocopy`, `enrichment_composition`, `enrichment_volcano`, `enrichment_effect_magnitude` (`enrichment`); `enrichment_<target>` (`enrichment_per_target`, top 12 embedded) | `analysis.clustering.enabled` (default on) |
 | perturbation_strength | `perturbation_volcano`, `perturbation_waterfall`, `perturbation_control_comparison` (`overview`); `perturbation_<target>` (`per_target`, top 12 embedded) | `analysis.perturbation_effects.strength` |
 | perturbation_effects | `regulome_heatmap`, `module_program_strength`, `module_program_alluvial`, `module_correlation`, `program_activity_by_cluster`, `module_connectivity`, `module_network`, `tf_hub_network`, `perturbation_program_heatmap` (`gene_programs`); `program_<P>_umap` (`gene_programs_umap`); `ps_outcome_by_target`, `ps_escaper_fraction`, `ps_vs_perturbation_strength` (`ps`); `ps_quadrant_<target>` (`ps_per_target`); `ps_lda_overview`, `ps_lda_high_confidence` (`ps_lda`); `ps_lda_<target>` (`ps_lda_per_target`); `lochness_self_enrichment`, `lochness_distributions`, `lochness_by_cluster`, `lochness_self_umap` (`lochness`); `lochness_<target>` (`lochness_per_target`); `protein_effect_heatmap` (`protein_effects`); `ps_vs_protein`, `program_activity_vs_protein`, `rna_vs_protein_effects`, `perturbation_overview` (`concordance`) | `analysis.perturbation_effects.enabled` (default on) |
+| perturbation_distance | `perturbation_distance_ranking`, `perturbation_atlas`, `ps_vs_distance_map` (`distance`); `perturbation_phenotype_space`, `perturbation_distance_matrix`, `module_concordance` (`distance_space`); `distance_vs_protein`, `phenotype_space_protein`, `phenotype_module_protein` (`distance_protein`) | `analysis.perturbation_effects.distance` / `distance_space` enabled (off by default, as in the reference) |
 
 ## report.html
 
@@ -96,7 +101,8 @@ Header/navigation (run, time, version) · Run summary cards · Warnings · Input
 modality audit · Quality control (filtering steps, QC summary, before, after, Perturb-seq
 guide QC) · Clustering analysis · Perturbation strength · Perturbation enrichment across
 clusters · Per-cell perturbation response (PS, LDA) · lochNESS · Co-functional modules &
-gene programs · Protein QC (+ protein representation) · Protein effects · RNA–protein
+gene programs · Perturbation distance vs control · Perturbation distance space & phenotype
+modules · Master perturbation table · Protein QC (+ protein representation) · Protein effects · RNA–protein
 concordance · Multimodal summaries (cross-modality diagnostics, group summaries,
 integrated perturbation summary) · Outputs and provenance. Sections whose analysis did
 not run are omitted and the numbering closes up.

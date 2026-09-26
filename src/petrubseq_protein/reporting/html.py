@@ -69,6 +69,7 @@ def section_views(ctx: ReportContext, max_rows: int) -> Dict[str, Any]:
     from .enrichment_plots import ST_ENRICH, ST_PER_TARGET as ST_ENRICH_TARGET
     from .perturbation_plots import SECTION as PE_SECTION, ST_CONC, ST_LDA, ST_LDA_TARGET, ST_LOCH, ST_LOCH_TARGET, ST_PROG, ST_PROG_UMAP, ST_PROT, ST_PS, ST_PS_TARGET
     from .strength_plots import SECTION as STR_SECTION, ST_OVERVIEW, ST_PER_TARGET as ST_STR_TARGET
+    from .distance_plots import SECTION as PD_SECTION, ST_DIST, ST_PROT as ST_PD_PROT, ST_SPACE
 
     reg = ctx.registry
     figs = {
@@ -81,6 +82,7 @@ def section_views(ctx: ReportContext, max_rows: int) -> Dict[str, Any]:
         "pe_lochness": reg.by_section(PE_SECTION, ST_LOCH), "pe_lochness_per_target": reg.by_section(PE_SECTION, ST_LOCH_TARGET),
         "pe_gene_programs": reg.by_section(PE_SECTION, ST_PROG), "pe_gene_programs_umap": reg.by_section(PE_SECTION, ST_PROG_UMAP),
         "pe_protein_effects": reg.by_section(PE_SECTION, ST_PROT), "pe_concordance": reg.by_section(PE_SECTION, ST_CONC),
+        "pd_distance": reg.by_section(PD_SECTION, ST_DIST), "pd_space": reg.by_section(PD_SECTION, ST_SPACE), "pd_protein": reg.by_section(PD_SECTION, ST_PD_PROT),
     }
     extras = {"strength": _extras(reg, STR_SECTION, ST_STR_TARGET), "enrichment": _extras(reg, CS_SECTION, ST_ENRICH_TARGET), "ps": _extras(reg, PE_SECTION, ST_PS_TARGET), "lda": _extras(reg, PE_SECTION, ST_LDA_TARGET),
               "lochness": _extras(reg, PE_SECTION, ST_LOCH_TARGET), "programs": _extras(reg, PE_SECTION, ST_PROG_UMAP)}
@@ -132,13 +134,38 @@ def section_views(ctx: ReportContext, max_rows: int) -> Dict[str, Any]:
                      "top_hub": m.info.get("top_hub", ""), "top_hub_n": m.info.get("top_hub_n_de", 0), "n_tf_edges": m.info.get("n_tf_edges", 0), "program_genes": {p: m.program_genes.get(p, [])[:10] for p in m.program_labels},
                      "modules": _t(m.perturbation_modules, n=max_rows), "programs": _t(m.gene_programs, ["gene", "program", "program_size", "mean_log2fc", "mean_abs_log2fc", "n_targets_de", "n_targets_up", "n_targets_down"], max_rows),
                      "module_program": _t(m.module_program.astype(float), n=max_rows, index=True), "hubs": _t(m.hubs, n=max_rows)}
+    # --- perturbation distance / distance space / master table ------------------------------------
+    dist_view = space_view = master_view = None
+    if pe is not None and pe.distance is not None and not pe.distance.empty:
+        d = pe.distance
+        dist_view = {"n_targets": int(len(d.table)), "n_hits": int(d.table["significant"].sum()), "fdr_threshold": d.info.get("fdr_threshold"), "n_permutations": d.info.get("n_permutations"), "control": CONTROL_LABELS.get(d.control_used, d.control_used),
+                     "n_control": d.n_control_cells, "n_control_available": d.info.get("n_control_cells_available"), "representation": d.representation, "secondary": d.secondary_metric, "top_target": d.info.get("top_target", ""), "top_distance": f"{d.info.get('top_distance', float('nan')):.3f}",
+                     "min_cells": d.info.get("min_cells"), "max_cells": d.info.get("max_cells_per_target"), "max_control": d.info.get("max_control_cells"), "n_skipped": int(len(d.skipped)),
+                     "table": _t(d.table, n=max_rows), "skipped": _t(d.skipped, n=max_rows) if len(d.skipped) else ""}
+    if pe is not None and pe.distance_space is not None and not pe.distance_space.empty:
+        sp_ = pe.distance_space
+        ev = sp_.eigenvalues
+        space_view = {"n_targets": int(len(sp_.distance_matrix)), "n_pairs": sp_.info.get("n_pairs"), "n_components": sp_.n_components, "n_modules": sp_.info.get("n_modules"), "module_rule": sp_.info.get("module_rule"), "linkage": sp_.linkage_method, "metric": sp_.metric,
+                      "k": sp_.info.get("n_neighbors_used"), "min_cells": sp_.info.get("min_cells"), "pcoa_pct": [f"{100 * v / ev.sum():.0f}" for v in ev[:3]] if ev.size and ev.sum() > 0 else [], "n_skipped": int(len(sp_.skipped)),
+                      "concordance": pe.module_concordance or {}, "modules": _t(sp_.phenotype_modules.sort_values(["phenotype_module", "target"]), n=max_rows), "neighbors": _t(sp_.neighbors[sp_.neighbors["rank"] <= 3], n=max_rows), "coordinates": _t(sp_.coordinates.round(4), n=max_rows)}
+    if pe is not None and pe.master is not None and not pe.master.empty:
+        m = pe.master
+        ref_cols = [c for c in m.info.get("reference_columns", []) if c in m.perturbation.columns]
+        ext_cols = [c for c in ("phenotype_nearest_neighbor", "strongest_cluster", "cluster_enrichment_fdr", "cluster_composition_shift_pct", "strongest_protein", "strongest_protein_effect", "strongest_protein_fdr", "n_proteins_significant") if c in m.perturbation.columns]
+        master_view = {"n_targets": int(len(m.perturbation)), "n_columns": int(m.perturbation.shape[1]), "n_reference_columns": len(ref_cols), "n_extension_columns": len(m.info.get("extension_columns", [])), "n_protein_rows": int(len(m.protein)),
+                       "table": _t(m.perturbation, ref_cols + ext_cols, max_rows), "protein_table": _t(m.protein, ["target", "protein", "n_perturbed", "n_control", "protein_effect", "protein_fdr", "protein_significant", "protein_effect_level", "ps_protein_rho", "ps_protein_fdr", "ps_protein_level", "lochness_protein_rho", "lochness_protein_fdr", "lochness_protein_level", "energy_distance", "distance_fdr", "distance_protein_rho_signed", "distance_protein_fdr_signed", "distance_protein_rho_abs", "distance_protein_fdr_abs", "distance_protein_level", "phenotype_module", "phenotype_module_protein_fdr", "phenotype_module_protein_level", "phenotype_geometry_protein_rho", "phenotype_geometry_protein_fdr", "phenotype_geometry_protein_level", "cofunctional_module", "strongest_gene_program", "program_protein_rho", "program_protein_fdr", "program_protein_level", "target_columns_level"], max_rows),
+                       "distance_protein": _t(m.distance_protein.round(4), n=max_rows), "mantel": _t(m.phenotype_protein_mantel.round(4), n=max_rows), "module_protein": _t(m.phenotype_module_protein.round(4), n=max_rows), "module_means": _t(m.phenotype_module_means.round(4), n=max_rows),
+                       "power_note": m.info.get("power_note", ""), "has_protein": not m.distance_protein.empty,
+                       # atlas / map / concordance figures are drawn from the master table even when the distance stages are off (reference behaviour); show them here then
+                       "orphan_figs": (figs["pd_distance"] if not dist_view else []) + (figs["pd_space"] if not space_view else [])}
     pe_view = None
     if pe is not None:
         info = pe.info()
         pe_view = {"info": {k: kv_table({kk: vv for kk, vv in v.items() if not isinstance(vv, (list, dict))}) for k, v in info.items() if isinstance(v, dict)},
                    "protein": _t(pe.protein.table if pe.protein else None, ["target", "protein", "n_perturbed", "n_control", "mean_perturbed", "mean_control", "effect", "cohen_d", "p_value", "fdr", "n_samples_tested", "n_samples_same_sign", "n_guides_tested", "n_guides_same_sign", "status"], 60),
                    "ps_protein": _t(pe.concordance.ps_protein if pe.concordance else None, ["scope", "target", "protein", "n_cells", "spearman_rho", "p_value", "fdr", "status"], 40),
-                   "lochness_protein": _t(pe.concordance.lochness_protein_summary if pe.concordance else None), "program_protein": _t(pe.concordance.program_protein_cells if pe.concordance else None, None, 40),
+                   "lochness_protein": _t(pe.concordance.lochness_protein_summary if pe.concordance else None), "lochness_protein_cells": _t(getattr(pe.concordance, "lochness_protein_cells", None) if pe.concordance else None, ["target", "protein", "n_cells", "spearman_rho", "p_value", "fdr", "status", "analysis_level"], 40),
+                   "program_protein": _t(pe.concordance.program_protein_cells if pe.concordance else None, None, 40),
                    "program_protein_targets": _t(pe.concordance.program_protein_targets if pe.concordance else None, None, 40), "summary": _t(pe.concordance.summary if pe.concordance else None, ["target", "n_cells", "direct_rna_log2fc", "direct_rna_ks_fdr", "effective_knockdown", "ps_median", "ps_auc_vs_control", "lochness_own_mean", "strongest_cluster", "strongest_cluster_direction", "cluster_enrichment_log2_or", "cluster_enrichment_fdr", "cluster_composition_shift_pct", "module", "n_de_genes", "rna_effect_magnitude", "strongest_gene_program", "gene_program_effect", "strongest_protein", "protein_effect_magnitude", "n_proteins_significant", "ps_protein_best", "strongest_program_protein_association"], 60)}
     # --- numbering ---------------------------------------------------------------------------
     nav: List[tuple] = [("inputs", "Inputs"), ("qc", "Quality control"), ("clustering", "Clustering" if cs_view else "Embedding")]
@@ -147,13 +174,16 @@ def section_views(ctx: ReportContext, max_rows: int) -> Dict[str, Any]:
     if ps_view: nav.append(("ps", "Per-cell response"))
     if loch_view: nav.append(("lochness", "lochNESS"))
     if mods_view: nav.append(("modules", "Modules & programs"))
+    if dist_view: nav.append(("distance", "Perturbation distance"))
+    if space_view: nav.append(("distance-space", "Distance space & phenotype modules"))
+    if master_view: nav.append(("master", "Master perturbation table"))
     nav.append(("protein-qc", "Protein QC"))
     if pe_view:
         nav += [("protein-effects", "Protein effects"), ("concordance", "RNA-protein concordance")]
     nav += [("multimodal", "Multimodal summaries"), ("outputs", "Outputs & provenance")]
     secn = {key: i + 1 for i, (key, _) in enumerate(nav)}
-    secn.update({"protein_qc": secn["protein-qc"], "protein_effects": secn.get("protein-effects", 0), "outputs": secn["outputs"]})
-    return {"figs": figs, "extras": extras, "cs": cs_view, "strength": strength_view, "enr": enr_view, "ps": ps_view, "loch": loch_view, "mods": mods_view, "pe": pe_view, "nav": nav, "secn": secn}
+    secn.update({"protein_qc": secn["protein-qc"], "protein_effects": secn.get("protein-effects", 0), "outputs": secn["outputs"], "distance_space": secn.get("distance-space", 0)})
+    return {"figs": figs, "extras": extras, "cs": cs_view, "strength": strength_view, "enr": enr_view, "ps": ps_view, "loch": loch_view, "mods": mods_view, "dist": dist_view, "space": space_view, "master": master_view, "pe": pe_view, "nav": nav, "secn": secn}
 
 
 def write_html(ctx: ReportContext, path: Path, embed: bool = True, max_rows: int = 100) -> Path:

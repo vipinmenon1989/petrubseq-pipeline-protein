@@ -1,19 +1,21 @@
-# SCIENTIFIC ANALYSIS CONFIG (not the public demo): the full pooled Papalexi
-# ECCITE-seq screen, every HTO singlet (17,473 cells), prepared with
+# PRODUCTION ANALYSIS CONFIG (canonical location: config/; not the public demo): the full
+# pooled Papalexi ECCITE-seq screen (GSE153056, GSM4633614-GSM4633618), every HTO singlet
+# (17,473 of 20,729 deposited cells; all IFN-gamma stimulated, no unstimulated condition), prepared with
 #   python demo/prepare_papalexi_demo.py --source ${DATA_ROOT}/ECCITE-seq --output ${DATA_ROOT}/analysis/papalexi_eccite_full --n-cells 17473 --min-per-stratum 1
 # (n-cells equals the number of eligible singlets, so nothing is sampled).
 # Settings follow config/demo_papalexi.yaml except: 50 RNA PCs (default), n_jobs 8.
+# Output: ${RESULTS_ROOT}/analysis/ECCITE-seq (results/demo/papalexi_eccite is the demo and is never overwritten).
 run:
-  name: papalexi_eccite_full
+  name: eccite_seq_full
 
 dataset:
-  name: papalexi_eccite_full
+  name: ECCITE-seq_full
   input_dir: ${DATA_ROOT}/analysis/papalexi_eccite_full   # all 17,473 HTO singlets of the pooled screen (prepare_papalexi_demo.py, no downsampling)
   description: >
     Papalexi et al. 2021 (Nat Genet 53:322) pooled ECCITE-seq CRISPR screen in
     IFN-gamma stimulated THP-1 cells: RNA + 4 ADTs (CD86, PD-L1, PD-L2, CD366)
-    + 111 sgRNAs (25 gene targets, non-targeting and eGFP controls). Demo subset
-    of one coherent experiment; raw UMI counts for every modality.
+    + 111 sgRNAs (25 gene targets, non-targeting and eGFP controls). Full pooled
+    screen, every HTO singlet; raw UMI counts for every modality.
 
 inputs:
   multiplexed:
@@ -88,8 +90,8 @@ compute:
   seed: 0
 
 output:
-  dir: ${RESULTS_ROOT}/analysis/papalexi_eccite_full
-  h5ad_name: papalexi_eccite_full_processed.h5ad
+  dir: ${RESULTS_ROOT}/analysis/ECCITE-seq
+  h5ad_name: eccite_seq_full_processed.h5ad
 
 # Perturbation analyses (on by default, as in the reference pipeline): perturbation
 # strength, modules / programs, PS, lochNESS, plus the protein extension.
@@ -122,6 +124,20 @@ analysis:
       min_cells_per_target: 10
     concordance:
       min_cells: 20
+    # Perturbation distance vs control and the pairwise distance space (reference stages
+    # 10-11; off by default in the reference, enabled here for the demo). Energy distance in
+    # X_pca, seeded 1000-permutation DistanceTest, BH-FDR; min_cells 30 (reference) leaves the
+    # 21 largest targets. docs/PERTURBATION_DISTANCE.md.
+    distance:
+      enabled: true
+      n_permutations: 1000               # reference default
+      min_cells: 30                      # reference default
+      random_seed: 123                   # reference default
+    distance_space:
+      enabled: true
+      n_modules: null                    # reference rule: max(2, min(9, K // 4)) -> 5 modules for 21 targets
+    master_table:
+      enabled: true                      # tables/master_perturbation_table.csv (+ the protein companion)
   # Leiden cell states on the RNA neighbour graph and perturbation x cluster
   # enrichment (reference stages; on by default). docs/CELL_STATES.md.
   clustering:

@@ -1,11 +1,12 @@
-# SCIENTIFIC ANALYSIS CONFIG (not the regression benchmark): full SCP1064 with the
-# standard QC defaults and the complete analysis. Dataset facts as in config/scp1064.yaml.
+# SMOKE TEST of the complete analysis (incl. the perturbation-distance stages) on the
+# 4,500-cell SCP1064 subset used by config/scp1064_smoke.yaml; settings as
+# config/analysis_scp1064.yaml apart from paths, n_jobs, n_pcs and the null sizes. Dataset facts as in config/scp1064.yaml.
 run:
-  name: SCP1064_analysis
+  name: SCP1064_analysis_smoke
 
 dataset:
-  name: SCP1064
-  input_dir: ${DATA_ROOT}/SCP1064          # ${DATA_ROOT} = $PETRUBSEQ_DATA_ROOT or <repo>/../data
+  name: SCP1064_smoke
+  input_dir: ${DATA_ROOT}/SCP1064/smoke          # ${DATA_ROOT} = $PETRUBSEQ_DATA_ROOT or <repo>/../data
   description: >
     Multi-modal pooled Perturb-CITE-seq screens in patient models define
     mechanisms of cancer immune evasion (Nat Genet 2021). Single Cell Portal
@@ -18,9 +19,6 @@ inputs:
     # other/RNA_expression.csv.gz); chunks are parsed in parallel. Values: ln(TPM+1).
     files:
       - expression/RNA_expression_subset1a.csv.gz
-      - expression/RNA_expression_subset1b_alpha.csv.gz
-      - expression/RNA_expression_subset1b_beta.csv.gz
-      - expression/RNA_expression_subset2.csv.gz
       - expression/RNA_expression_subset3.csv.gz
       - expression/RNA_expression_subset4.csv.gz
     format: dense_csv
@@ -102,7 +100,7 @@ rna:
     batch_key: null
   scale: true              # scaled HVG copy for PCA only (Wei Li scale_max_value 10); X is untouched
   scale_max_value: 10.0
-  n_pcs: 50               # Wei Li / Scanpy default
+  n_pcs: 30               # smaller subset
 
 protein:
   normalization: auto            # provided isotype-ratio matrix kept as obsm['protein']
@@ -170,14 +168,14 @@ report:
   max_table_rows: 100
 
 compute:
-  n_jobs: 8
+  n_jobs: 3
   chunk_rows: 500
   seed: 0                  # PCA / neighbors / UMAP random_state
   max_cells: null
 
 output:
-  dir: ${RESULTS_ROOT}/analysis/SCP1064     # scientific run; results/SCP1064 stays the validated regression output
-  h5ad_name: scp1064_processed.h5ad
+  dir: ${RESULTS_ROOT}/analysis/SCP1064_smoke     # scientific run; results/SCP1064 stays the validated regression output
+  h5ad_name: scp1064_analysis_smoke_processed.h5ad
   compression: gzip
   write_h5ad: true
   write_prefilter_h5ad: false   # before-filter figures + tables/cell_qc_prefilter.csv.gz cover this without a second object
@@ -198,7 +196,7 @@ analysis:
     control_classes: [non_targeting]
     lochness:
       n_neighbors: 300
-      n_permutations: 50               # 218k cells x 248 targets: 50 label permutations keep the null tractable
+      n_permutations: 20               # smoke: small null
     modules:
       n_programs: 4
       n_modules: 9
@@ -208,12 +206,14 @@ analysis:
     # space is O(K^2) pairs of <= 2000 x 2000 cells (K ~ 250 -> ~31,000 pairs).
     distance:
       enabled: true
-      n_permutations: 1000
+      n_permutations: 200               # smoke: 200 permutations
+      min_cells: 10                     # smoke subset: few cells per target
       max_cells_per_target: 2000
       max_control_cells: 5000
       stratify_by: condition            # proportional sampling across Control / IFNg / Co-culture when a group exceeds the caps
     distance_space:
       enabled: true
+      min_cells: 10
       stratify_by: condition
     master_table:
       enabled: true

@@ -140,6 +140,31 @@
 <h3>{{ secn.modules }}.5 Hub transcription factors</h3><div class="scroll">{{ mods.hubs }}</div>
 {% endif %}
 
+{% if dist %}
+<h2 id="distance">{{ secn.distance }}. Perturbation distance vs control</h2>
+<p class="sub">How far does each perturbation move the whole transcriptional state? The <b>energy distance</b> between a target's cells and the control cells ({{ dist.control }}, {{ dist.n_control }} of {{ dist.n_control_available }} cells used) in the {{ dist.representation }} embedding: 2 E|X-Y| - E|X-X'| - E|Y-Y'| over pairwise Euclidean distances, zero only when the two distributions coincide, sensitive to shifts in mean, spread and shape. Significance is a seeded label-permutation <b>DistanceTest</b> ({{ dist.n_permutations }} permutations, p = (1 + #permuted &ge; observed) / (1 + permutations)) with Benjamini-Hochberg correction across targets{% if dist.secondary %}; the {{ dist.secondary }} statistic (Gaussian RBF, median bandwidth) is reported beside it{% endif %}. Targets with fewer than {{ dist.min_cells }} cells are not tested; groups are capped at {{ dist.max_cells }} / {{ dist.max_control }} cells by deterministic sampling.</p>
+<div class="cards"><div class="card"><div class="v">{{ dist.n_targets }}</div><div class="k">Targets tested</div></div><div class="card"><div class="v">{{ dist.n_hits }}</div><div class="k">Significant (FDR &lt; {{ dist.fdr_threshold }})</div></div><div class="card"><div class="v">{{ dist.top_target }}</div><div class="k">Largest distance ({{ dist.top_distance }})</div></div><div class="card"><div class="v">{{ dist.n_skipped }}</div><div class="k">Targets below min_cells</div></div></div>
+<h3>{{ secn.distance }}.1 Ranking, atlas and penetrance map</h3>{% for f in figs.pd_distance %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.distance }}.2 Target-level distance statistics</h3><div class="scroll">{{ dist.table }}</div>
+{% if dist.skipped %}<details><summary>Targets not tested ({{ dist.n_skipped }})</summary>{{ dist.skipped }}</details>{% endif %}
+{% endif %}
+
+{% if space %}
+<h2 id="distance-space">{{ secn.distance_space }}. Perturbation distance space &amp; phenotype modules</h2>
+<p class="sub">The same {{ space.metric }} between every pair of the {{ space.n_targets }} targets with &ge; {{ space.min_cells }} cells ({{ space.n_pairs }} pairs) gives a target x target distance matrix. Classical multidimensional scaling (<b>PCoA</b>, positive eigenvalues only{% if space.pcoa_pct %}; axes 1-3 carry {{ space.pcoa_pct|join(' / ') }} % of the positive eigenvalue mass{% endif %}) projects it into {{ space.n_components }} coordinates; each target's {{ space.k }} nearest phenotypic neighbours are listed; <b>phenotype modules</b> are {{ space.linkage }}-linkage clusters of the matrix cut into {{ space.n_modules }} groups ({{ space.module_rule }}). Where the co-functional modules group perturbations by shared downstream genes, phenotype modules group them by the similarity of the cell states they produce{% if space.concordance %}; agreement of the two partitions: ARI = {{ '%.3f' % space.concordance.ari }}, NMI = {{ '%.3f' % space.concordance.nmi }} over {{ space.concordance.n_targets }} targets{% endif %}.</p>
+<h3>{{ secn.distance_space }}.1 Phenotype space, distance matrix and module concordance</h3>{% for f in figs.pd_space %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.distance_space }}.2 Phenotype module assignments</h3><div class="scroll">{{ space.modules }}</div>
+<h3>{{ secn.distance_space }}.3 Nearest phenotypic neighbours (top 3 per target; full table on disk)</h3><div class="scroll">{{ space.neighbors }}</div>
+<h3>{{ secn.distance_space }}.4 PCoA coordinates</h3><div class="scroll">{{ space.coordinates }}</div>
+{% endif %}
+
+{% if master %}
+<h2 id="master">{{ secn.master }}. Master perturbation table</h2>
+<p class="sub">One row per target consolidating every target-level result without collapsing them into a composite score: efficacy (own-gene log2FC, % knockdown, FDR, effective-knockdown call), penetrance (PS mean / median, responder and escaper fractions), topology (lochNESS mean / median / peak / % enriched), phenotype magnitude (energy distance, MMD, DistanceTest p / FDR / call), co-functional and phenotype modules ({{ master.n_reference_columns }} reference columns), then {{ master.n_extension_columns }} extension columns (nearest phenotypic neighbour, PCoA 1-2, strongest cluster association, strongest protein effect, per-protein effects and FDR). Sorted by energy distance. Full table: <code>tables/master_perturbation_table.csv</code>{% if master.n_protein_rows %}; the target x protein companion (<code>tables/master_perturbation_protein_table.csv</code>, {{ master.n_protein_rows }} rows) is in the multimodal summaries{% endif %}.</p>
+<div class="scroll">{{ master.table }}</div>
+{% for f in master.orphan_figs %}{{ render(f) }}{% endfor %}
+{% endif %}
+
 <h2 id="protein-qc">{{ secn.protein_qc }}. Protein QC</h2>
 {% if not protein_has_isotypes %}<div class="note">This antibody panel contains no isotype control antibodies. Isotype-based QC (isotype share per cell, background-dominated antibodies, targeting-vs-isotype counts) is therefore not applicable and is not shown; this is a property of the panel, not a failure.</div>{% endif %}
 <h3>{{ secn.protein_qc }}.1 Protein representations and features</h3>{{ tables.protein_info }}<div class="scroll">{{ tables.protein_features }}</div>
@@ -155,12 +180,22 @@
 
 <h2 id="concordance">{{ secn.concordance }}. RNA-protein concordance</h2>
 <p class="sub">Multimodal extension. Associations kept at the level where each quantity is defined: PS versus protein within a target's cells, lochNESS versus protein effect across targets, gene-program activity versus protein at the cell and target level. These are correlations, not evidence of mediation or causality.</p>
-{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
+{{ pe.info.concordance }}<h4>PS vs protein (CELL_LEVEL: within each target's cells, per-cell PS vs per-cell protein)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (CELL_LEVEL: within each target's cells, per-cell own-target lochNESS vs per-cell protein)</h4>{{ pe.lochness_protein_cells }}<h4>lochNESS vs protein (TARGET_LEVEL: own-cell mean lochNESS vs protein effect across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (CELL_LEVEL)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (TARGET_LEVEL)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
+{% if master and master.has_protein %}
+<h3>{{ secn.concordance }}.1 Perturbation distance vs protein (TARGET_LEVEL)</h3>
+<p class="sub">Does a larger global transcriptional displacement go with a larger protein change? The energy distance to control is one number per target, so the unit of observation is the target: per protein, Spearman across targets (n = targets, never cells) between the energy distance and the protein effect, for the signed effect and for |effect| separately (two BH families).{% if master.power_note %} {{ master.power_note }}.{% endif %}</p>
+{{ master.distance_protein }}
+<h3>{{ secn.concordance }}.2 Phenotype geometry and phenotype modules vs protein</h3>
+<p class="sub"><b>TARGET_PAIR_LEVEL</b> Mantel test: Spearman between the upper triangles of the target x target RNA energy-distance matrix and the target x target protein-effect-profile distance matrix (all proteins jointly = Euclidean distance between the CLR-effect vectors; one protein at a time = |E<sub>i,p</sub> &minus; E<sub>j,p</sub>|), over the same targets in the same order. The K(K&minus;1)/2 pairs share targets and are not independent, so significance comes from seeded permutations of the protein matrix's target labels (p = (1 + #permuted &ge; observed) / (1 + permutations)). <b>PHENOTYPE_MODULE_LEVEL</b>: Kruskal-Wallis of each protein's target-level effect across the phenotype modules with enough targets (singletons and small modules excluded), and the module x protein means. Both describe whether targets that produce similar cell states also produce similar protein changes; with a 4-antibody panel they are underpowered and are not causal.</p>
+<h4>Mantel (TARGET_PAIR_LEVEL)</h4>{{ master.mantel }}<h4>Protein effect across phenotype modules (PHENOTYPE_MODULE_LEVEL)</h4>{{ master.module_protein }}{{ master.module_means }}
+{% for f in figs.pd_protein %}{{ render(f) }}{% endfor %}
+{% endif %}
 
 <h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
 <h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}
 {% for name, df in group_summaries %}<h4>{{ name }} summary</h4><div class="scroll">{{ df }}</div>{% endfor %}
 <h3>{{ secn.multimodal }}.2 Integrated perturbation summary</h3><p class="sub">One row per target joining the existing results: direct knockdown of the target's own gene (perturbation strength), PS, lochNESS, strongest cluster association and composition shift (enrichment), module, strongest gene program, strongest protein effect, and the strongest PS-protein and program-protein associations. Full table: tables/perturbation_effects/perturbation_summary.csv.</p><div class="scroll">{{ pe.summary }}</div>
+{% if master and master.n_protein_rows %}<h3>{{ secn.multimodal }}.3 Master perturbation x protein table</h3><p class="sub">One row per target x protein. Every statistic carries a level column: the protein effect (TARGET_LEVEL: perturbed vs control cells of that target); the within-target PS-protein and lochNESS-protein Spearman (CELL_LEVEL, n = that target's cells); the target-level master columns repeated on each of the target's rows (TARGET_LEVEL); the per-protein distance-protein Spearman (TARGET_LEVEL, n = targets, repeated on each of the protein's rows); the per-protein module test (PHENOTYPE_MODULE_LEVEL) and per-protein geometry Mantel (TARGET_PAIR_LEVEL), also repeated per protein. The joint (all-protein) geometry statistic is kept out of this table (tables/rna_protein_geometry_concordance.csv). Full table: tables/master_perturbation_protein_table.csv.</p><div class="scroll">{{ master.protein_table }}</div>{% endif %}
 {% else %}
 <h2 id="multimodal">{{ secn.multimodal }}. Multimodal summaries</h2>
 <h3>{{ secn.multimodal }}.1 Cross-modality diagnostics</h3>{{ tables.diagnostics }}{% for f in figs.multimodal %}{{ render(f) }}{% endfor %}

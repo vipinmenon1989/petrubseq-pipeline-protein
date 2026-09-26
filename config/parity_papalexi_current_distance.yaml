@@ -1,0 +1,92 @@
+# Current pipeline on the bundled Papalexi 1,800-cell demo subset WITH the perturbation-distance
+# stages enabled (counterpart of config/parity_reference_papalexi_distance.yaml), with the
+# INPUT-LEVEL settings matched to config/parity/reference_papalexi.yaml:
+# QC thresholds (200/3 prefilter, 1000 genes, 20 % mt), median-library-size
+# normalization, 3000 HVGs, 50 PCs, 15 neighbours, Leiden 1.0, eGFP treated
+# as a targeting label (as the reference does) and NT as the only control.
+# Analysis blocks are left at the package defaults so that the same config
+# documents the pipeline BEFORE and AFTER the parity corrections.
+run:
+  name: papalexi_current_parity_distance
+dataset:
+  name: papalexi_eccite
+  input_dir: ${REPO_ROOT}/demo/data/papalexi_eccite
+inputs:
+  multiplexed:
+    format: mtx
+    path: filtered_feature_bc_matrix
+    feature_types:
+      rna: [Gene Expression]
+      protein: [Antibody Capture]
+      guide: [CRISPR Guide Capture]
+    var_names: id
+  protein:
+    required: true
+  metadata:
+    file: cells.csv
+    format: auto
+columns:
+  cell_id: cell
+  condition: stimulation
+  sample: hto_sample
+  lane: lane
+  batch: lane_group
+  rna_total_counts: null
+perturbation:
+  guide_target_regex: "^(?P<target>.+?)g(?P<index>\\d+)$"
+  guide_target_table: guide_targets.csv
+  control_classes:
+    non_targeting: ["^NT$"]
+  min_cells_per_guide: 10
+  min_cells_per_target: 10
+  assignment:
+    source: auto
+    method: dominant
+    min_umi: 3
+    dominance_ratio: 2.0
+    max_second_umi: -1
+    detection_min_umi: 3
+alignment:
+  required: [rna, protein, metadata]
+rna:
+  input_state: raw_counts
+  target_sum: null
+  n_pcs: 50
+protein:
+  normalization: auto
+  extra_representations: []
+  isotype_patterns: ["IgG"]
+  feature_table: antibodies.csv
+  n_pcs: 3
+umap:
+  min_features: 3
+  color_by: [perturbation_class, hto_sample]
+qc:
+  prefilter: {enabled: true, min_genes_per_cell: 200, min_cells_per_gene: 3}
+  filter:
+    enabled: true
+    rna: {min_genes: 1000, max_pct_mt: 20.0}
+    perturbation: {cells: all}
+report:
+  title: "Current pipeline on the Papalexi demo subset (parity settings)"
+compute:
+  n_jobs: 2
+  seed: 0
+output:
+  dir: ${RESULTS_ROOT}/parity/current_papalexi_distance
+  h5ad_name: current_processed.h5ad
+analysis:
+  perturbation_effects:
+    enabled: true
+    control_classes: [non_targeting]
+    target_gene_map:
+      PDL1: CD274
+    # reference distance defaults (only `enabled` differs from the package defaults)
+    distance:
+      enabled: true
+    distance_space:
+      enabled: true
+    master_table:
+      enabled: true
+  clustering:
+    enabled: true

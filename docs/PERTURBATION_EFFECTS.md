@@ -3,8 +3,9 @@
 Enabled with `analysis.perturbation_effects.enabled: true` (the default, as in the
 reference pipeline). They run after the representations and the Leiden clustering, in
 the reference order: **perturbation strength** → (perturbation × cluster enrichment,
-docs/CELL_STATES.md) → **modules / gene programs** → **PS** → **lochNESS** → the
-protein extension (**protein effects**, **RNA–protein concordance**). The behavioural
+docs/CELL_STATES.md) → **modules / gene programs** → **PS** → **lochNESS** → **perturbation
+distance / distance space / phenotype modules** (docs/PERTURBATION_DISTANCE.md) → the
+protein extension (**protein effects**, **RNA–protein concordance**) → the master tables. The behavioural
 reference is `weili-lab/perturbseq-pipeline` (local checkout audited stage by stage in
 docs/reference/REFERENCE_PIPELINE_COMPLETE_AUDIT.md); the numerical parity of every
 stage on the same cells and counts is in docs/reference/PARITY_RESULTS.md
@@ -134,20 +135,25 @@ unchanged.
 * **PS ↔ protein** (cell level, within target): Spearman rho between PS and protein value
   across a target's perturbed cells (≥ `min_cells` 20), BH-FDR over the within-target tests;
   a pooled row is descriptive only — `ps_protein_association.csv`.
-* **lochNESS ↔ protein** (target level): per protein, Spearman across targets between
-  own-cell mean lochNESS and the protein effect (and |effect|) — `lochness_protein_summary.csv`,
-  `lochness_protein_association.csv`.
+* **lochNESS ↔ protein** (cell level, within target): Spearman between each perturbed cell's
+  own-target lochNESS score and its protein value, BH-FDR over the within-target tests —
+  `lochness_protein_association_cells.csv` / `tables/lochness_protein_associations.csv`; and
+  (target level) per protein, Spearman across targets between own-cell mean lochNESS and the
+  protein effect (and |effect|) — `lochness_protein_summary.csv`, `lochness_protein_association_targets.csv`.
 * **gene program ↔ protein**: cell level over single-guide and control cells (program
   activity vs protein value) — `program_protein_association_cells.csv`; target level
   (perturbation × program effect vs perturbation × protein effect) — `program_protein_association_targets.csv`.
 * **Integrated summary** `perturbation_summary.csv` (`uns['perturbation_summary']`).
 
-These are associations. None establishes mediation or causality.
+These are associations. None establishes mediation or causality. The level of every
+cross-modal statistic (CELL / TARGET / TARGET_PAIR / PHENOTYPE_MODULE) and the pseudoreplication
+guards are documented in docs/RNA_PROTEIN_LEVELS.md; every table carries an `analysis_level` column.
 
 ## Report
 
 Sections in the reference order: QC (incl. guide QC) · Clustering · Perturbation strength ·
 Perturbation enrichment across clusters · Per-cell perturbation response (PS, LDA) ·
-lochNESS · Co-functional modules & gene programs; then the extension: Protein QC ·
+lochNESS · Co-functional modules & gene programs · Perturbation distance vs control · Distance
+space & phenotype modules · Master perturbation table; then the extension: Protein QC ·
 Protein effects · RNA–protein concordance · Multimodal summaries · Outputs. Per-target
 figures beyond `top_n_report` (12) are written to disk and listed in the report.

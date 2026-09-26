@@ -437,14 +437,21 @@ def run_pipeline(cfg: Config) -> PipelineResult:
             if cs_res.enrichment is not None and cs_res.enrichment.empty:
                 notes.append(f"Perturbation x cluster enrichment not computed: {cs_res.enrichment.info.get('status')}.")
     if pe_enabled:
-        with st.stage("perturbation effects (modules, PS, lochNESS, protein, concordance)"):
+        with st.stage("perturbation effects (modules, PS, lochNESS, distance, protein, concordance, master tables)"):
             from .reporting.perturbation_plots import perturbation_effect_figures
-            pe_res = pe_analysis.run_perturbation_effects(adata, cfg, strength)
+            pe_res = pe_analysis.run_perturbation_effects(adata, cfg, strength, cs_res)
             integrated = pe_analysis.integrate_target_summary(pe_res, cs_res)
             if integrated is not None:
                 pe_res.concordance.summary = integrated
             pe_analysis.attach(adata, pe_res)
             perturbation_effect_figures(pe_res, adata, cfg, registry)
+            for name, r in (("Perturbation distance", pe_res.distance), ("Perturbation distance space", pe_res.distance_space)):
+                if r is not None and r.empty:
+                    warnings.append(f"{name} not computed: {r.note}.")
+                elif r is not None and len(r.skipped):
+                    notes.append(f"{name}: {len(r.skipped)} target(s) below min_cells = {r.info.get('min_cells')} (tables/perturbation_distance/*_skipped.csv).")
+            if pe_res.master is not None and pe_res.master.info.get("power_note"):
+                notes.append(f"Distance-protein associations: {pe_res.master.info['power_note']}.")
             for name, r in (("PS", pe_res.ps), ("lochNESS", pe_res.lochness), ("protein effects", pe_res.protein)):
                 if r is not None and getattr(r, "skipped", None) is not None and len(r.skipped):
                     notes.append(f"{name}: {len(r.skipped)} target(s) not analysed (see tables/perturbation_effects/*_skipped.csv or the {name} table).")
@@ -518,11 +525,12 @@ def run_pipeline(cfg: Config) -> PipelineResult:
         for name, df in tables.items():
             if df is None:
                 continue
-            long_form = name in ("condition_guide_coverage", "condition_target_coverage", "qc_filtering_steps", "qc_summary")
+            long_form = name in ("condition_guide_coverage", "condition_target_coverage", "qc_filtering_steps", "qc_summary", "master_perturbation_table", "master_perturbation_protein_table",
+                                 "ps_protein_associations", "lochness_protein_associations", "distance_protein_associations", "phenotype_module_protein_associations", "rna_protein_geometry_concordance")
             gz = name in ("cell_qc", "cell_qc_prefilter")
             p = tdir / f"{name}.csv{'.gz' if gz else ''}"
             p.parent.mkdir(parents=True, exist_ok=True)
-            long_form = long_form or (name.startswith(("perturbation_effects/", "cell_states/", "perturbation_strength/")) and isinstance(df.index, pd.RangeIndex))
+            long_form = long_form or (name.startswith(("perturbation_effects/", "cell_states/", "perturbation_strength/", "perturbation_distance/")) and isinstance(df.index, pd.RangeIndex))
             df.to_csv(p, index=not long_form)
             table_paths[name] = p
     # 20 -----------------------------------------------------------------
@@ -725,6 +733,14 @@ def object_schema(adata: ad.AnnData, rna_info: Dict[str, Any], prot_info: Dict[s
         sch[f"obs['{ckey}']"] = {"shape": f"{adata.n_obs} cells, {adata.obs[ckey].nunique()} clusters", "content": "Leiden cluster on the RNA neighbour graph (numbered states, not cell types)", "status": "derived (Stage F)"}
     if "perturbation_cluster_enrichment" in adata.uns:
         sch["uns['perturbation_cluster_enrichment']"] = {"shape": f"{len(adata.uns['perturbation_cluster_enrichment'])} rows", "content": "target x cluster Fisher/CMH enrichment under both control arms (Haldane odds ratio, p, BH-FDR per arm, direction, guide concordance)", "status": "derived"}
+    if "perturbation_distance" in adata.uns:
+        sch["uns['perturbation_distance']"] = {"shape": f"{len(adata.uns['perturbation_distance'])} rows", "content": "per-target energy distance vs control in X_pca, DistanceTest permutation p, BH-FDR, call (reference distance stage)", "status": "derived"}
+    if "perturbation_distance_matrix" in adata.uns:
+        sch["uns['perturbation_distance_matrix']"] = {"shape": f"{adata.uns['perturbation_distance_matrix'].shape[0]} x {adata.uns['perturbation_distance_matrix'].shape[1]} targets", "content": "pairwise target x target energy distance (symmetric, zero diagonal); PCoA / phenotype modules derive from it", "status": "derived"}
+    if "phenotype_modules" in adata.uns:
+        sch["uns['phenotype_modules']"] = {"shape": f"{len(adata.uns['phenotype_modules'])} rows", "content": "phenotype module (average-linkage cluster of the pairwise distance matrix) per target", "status": "derived"}
+    if "master_perturbation_table" in adata.uns:
+        sch["uns['master_perturbation_table']"] = {"shape": f"{len(adata.uns['master_perturbation_table'])} rows", "content": "master perturbation table: efficacy, PS, lochNESS, distance, modules per target (reference meta) + protein / cluster extension columns", "status": "derived"}
     if "perturbation_strength" in adata.uns:
         sch["uns['perturbation_strength']"] = {"shape": f"{len(adata.uns['perturbation_strength'])} rows", "content": "per-target knockdown of the target's own expression vs ntc / other controls (log2FC, KS, MWU, BH-FDR, hit call, rank)", "status": "derived"}
     if "X_lda_umap" in adata.obsm:

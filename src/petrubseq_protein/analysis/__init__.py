@@ -6,8 +6,10 @@ representations exist:
 
     Leiden clustering  ->  perturbation strength  ->  perturbation x cluster enrichment
     ->  co-functional modules / gene programs  ->  PS  ->  lochNESS
+    ->  perturbation distance vs control  ->  distance space / phenotype modules
 
-followed by the protein extension (protein effects, RNA-protein concordance).
+followed by the protein extension (protein effects, RNA-protein concordance) and the
+master perturbation tables (reference ``meta`` stage + the protein master table).
 ``run_clustering`` / ``run_enrichment`` (``analysis.clustering``) and
 ``run_perturbation_effects`` (``analysis.perturbation_effects``) are the entry
 points; ``attach`` writes the results into the AnnData and ``tables`` returns every
@@ -26,7 +28,9 @@ import pandas as pd
 
 from ..config import Config
 from .concordance import ConcordanceResults, compute_concordance
+from .distance import DistanceResults, DistanceSpaceResults, compute_distance_space, compute_perturbation_distance
 from .lochness import LochnessResults, compute_lochness
+from .master_table import MasterTables, build_master_tables
 from .modules import ModulesResults, compute_modules
 from .perturbation_strength import StrengthResults, compute_perturbation_strength
 from .protein_effects import ProteinEffectsResults, compute_protein_effects
@@ -43,14 +47,20 @@ class PerturbationEffects:
     modules: Optional[ModulesResults] = None
     protein: Optional[ProteinEffectsResults] = None
     concordance: Optional[ConcordanceResults] = None
+    distance: Optional[DistanceResults] = None
+    distance_space: Optional[DistanceSpaceResults] = None
+    master: Optional[MasterTables] = None
     ps_vs_strength: Optional[pd.DataFrame] = None
+    module_concordance: Optional[dict] = None     # ARI / NMI of co-functional vs phenotype modules (figure statistic)
     notes: Optional[list] = None
 
     def info(self) -> Dict[str, Any]:
         out: Dict[str, Any] = {"enabled": True}
-        for name in ("strength", "ps", "lochness", "modules", "protein", "concordance"):
+        for name in ("strength", "ps", "lochness", "modules", "distance", "distance_space", "protein", "concordance", "master"):
             r = getattr(self, name)
             out[name] = dict(r.info) if r is not None else {"status": "disabled"}
+        if self.module_concordance:
+            out["module_concordance"] = dict(self.module_concordance)
         return out
 
 
@@ -61,8 +71,9 @@ def run_perturbation_strength(adata: ad.AnnData, cfg: Config) -> Optional[Streng
     return compute_perturbation_strength(adata, cfg)
 
 
-def run_perturbation_effects(adata: ad.AnnData, cfg: Config, strength: Optional[StrengthResults] = None) -> PerturbationEffects:
-    """Modules -> PS -> lochNESS -> protein effects -> concordance (the reference order after enrichment)."""
+def run_perturbation_effects(adata: ad.AnnData, cfg: Config, strength: Optional[StrengthResults] = None, cell_states=None) -> PerturbationEffects:
+    """Modules -> PS -> lochNESS -> distance -> distance space -> protein effects -> concordance -> master tables
+    (the reference order after enrichment; ``cell_states`` adds the cluster-enrichment columns to the master table)."""
     pe = cfg.analysis.perturbation_effects
     res = PerturbationEffects(strength=strength, notes=[])
     if pe.modules.enabled:
@@ -72,11 +83,34 @@ def run_perturbation_effects(adata: ad.AnnData, cfg: Config, strength: Optional[
         res.ps_vs_strength = compare_with_strength(res.ps, strength)
     if pe.lochness.enabled:
         res.lochness = compute_lochness(adata, cfg)
+    if pe.distance.enabled:
+        res.distance = compute_perturbation_distance(adata, cfg)
+    if pe.distance_space.enabled:
+        res.distance_space = compute_distance_space(adata, cfg)
     if pe.protein.enabled:
         res.protein = compute_protein_effects(adata, cfg)
     if pe.concordance.enabled:
         res.concordance = compute_concordance(adata, cfg, res.ps, res.lochness, res.modules, res.protein)
+    build_master(res, cfg, cell_states, adata)
     return res
+
+
+def _guides_per_target(adata: ad.AnnData) -> Optional[pd.Series]:
+    obs = adata.obs
+    if "guide" not in obs.columns:
+        return None
+    single = obs["perturbation_class"].astype(str) == "single_targeting"
+    return obs.loc[single].groupby(obs.loc[single, "target"].astype(str))["guide"].nunique()
+
+
+def build_master(res: PerturbationEffects, cfg: Config, cell_states=None, adata: Optional[ad.AnnData] = None) -> Optional[MasterTables]:
+    """The master perturbation table (reference ``meta`` stage) and the protein master table / distance-protein associations."""
+    if not cfg.analysis.perturbation_effects.master_table.enabled:
+        res.master = None
+        return None
+    enrichment = getattr(cell_states, "enrichment", None) if cell_states is not None else None
+    res.master = build_master_tables(cfg, res.strength, res.ps, res.lochness, res.distance, res.modules, res.distance_space, res.protein, enrichment, res.concordance, _guides_per_target(adata) if adata is not None else None)
+    return res.master
 
 
 def integrate_target_summary(res: PerturbationEffects, cell_states=None) -> Optional[pd.DataFrame]:
@@ -128,11 +162,13 @@ def integrate_target_summary(res: PerturbationEffects, cell_states=None) -> Opti
 
 
 def _h5(df: pd.DataFrame) -> pd.DataFrame:
-    """h5ad-safe copy: object columns as strings (NaN -> '')."""
+    """h5ad-safe copy: object / nullable columns as strings (NaN -> ''), nullable integers as float."""
     df = df.copy()
     for c in df.columns:
-        if df[c].dtype == object:
-            df[c] = df[c].where(df[c].notna(), "").astype(str)
+        if str(df[c].dtype) in ("Int64", "Int32", "Float64"):
+            df[c] = df[c].astype(float)
+        elif df[c].dtype == object or str(df[c].dtype) == "boolean" or isinstance(df[c].dtype, pd.CategoricalDtype):
+            df[c] = df[c].astype(object).where(df[c].notna(), "").astype(str)
     df.columns = [str(c) for c in df.columns]
     df.index = df.index.astype(str)
     return df
@@ -165,6 +201,14 @@ def attach(adata: ad.AnnData, res: PerturbationEffects) -> None:
         adata.uns["protein_effects"] = _h5(res.protein.table)
     if res.concordance is not None and not res.concordance.summary.empty:
         adata.uns["perturbation_summary"] = _h5(res.concordance.summary)
+    if res.distance is not None and not res.distance.empty:
+        adata.uns["perturbation_distance"] = _h5(res.distance.table)
+    if res.distance_space is not None and not res.distance_space.empty:
+        # the N x N pairwise matrix lives in uns (targets x targets; not a per-cell obsm quantity)
+        adata.uns["perturbation_distance_matrix"] = res.distance_space.distance_matrix.astype("float64")
+        adata.uns["phenotype_modules"] = _h5(res.distance_space.phenotype_modules)
+    if res.master is not None and not res.master.empty:
+        adata.uns["master_perturbation_table"] = _h5(res.master.perturbation)
 
 
 def tables(res: PerturbationEffects) -> Dict[str, pd.DataFrame]:
@@ -209,10 +253,42 @@ def tables(res: PerturbationEffects) -> Dict[str, pd.DataFrame]:
         out[f"{d}/protein_effect_matrix"] = res.protein.matrix
     if res.concordance is not None:
         c = res.concordance
-        for name, df in (("ps_protein_association", c.ps_protein), ("lochness_protein_association", c.lochness_protein), ("lochness_protein_summary", c.lochness_protein_summary),
+        for name, df in (("ps_protein_association", c.ps_protein), ("lochness_protein_association_cells", c.lochness_protein_cells), ("lochness_protein_association_targets", c.lochness_protein), ("lochness_protein_summary", c.lochness_protein_summary),
                          ("program_protein_association_cells", c.program_protein_cells), ("program_protein_association_targets", c.program_protein_targets), ("perturbation_summary", c.summary)):
             if df is not None and not df.empty:
                 out[f"{d}/{name}"] = df
+        # explicit analysis-level tables (top level of tables/; docs/RNA_PROTEIN_LEVELS.md)
+        if c.ps_protein is not None and not c.ps_protein.empty:
+            out["ps_protein_associations"] = c.ps_protein[c.ps_protein["scope"] == "within_target"].drop(columns=["scope"]).reset_index(drop=True)
+        if c.lochness_protein_cells is not None and not c.lochness_protein_cells.empty:
+            out["lochness_protein_associations"] = c.lochness_protein_cells.drop(columns=["scope"]).reset_index(drop=True)
+    dd = "perturbation_distance"
+    if res.distance is not None:
+        out[f"{dd}/perturbation_distance"] = res.distance.table
+        if len(res.distance.skipped):
+            out[f"{dd}/distance_skipped"] = res.distance.skipped
+    if res.distance_space is not None:
+        sp_ = res.distance_space
+        if not sp_.empty:
+            out[f"{dd}/perturbation_distance_matrix"] = sp_.distance_matrix
+            out[f"{dd}/perturbation_space_coordinates"] = sp_.coordinates
+            out[f"{dd}/perturbation_neighbors"] = sp_.neighbors
+            out[f"{dd}/phenotype_modules"] = sp_.phenotype_modules
+        if len(sp_.skipped):
+            out[f"{dd}/distance_space_skipped"] = sp_.skipped
+    if res.master is not None and not res.master.empty:
+        m = res.master
+        out["master_perturbation_table"] = m.perturbation
+        if not m.protein.empty:
+            out["master_perturbation_protein_table"] = m.protein
+        for name, df in (("distance_protein_association", m.distance_protein), ("distance_protein_targets", m.distance_protein_targets), ("phenotype_space_protein_mantel", m.phenotype_protein_mantel),
+                         ("phenotype_module_protein", m.phenotype_module_protein), ("phenotype_module_protein_means", m.phenotype_module_means)):
+            if df is not None and not df.empty:
+                out[f"{dd}/{name}"] = df
+        # explicit analysis-level tables (top level of tables/)
+        for name, df in (("distance_protein_associations", m.distance_protein), ("phenotype_module_protein_associations", m.phenotype_module_protein), ("rna_protein_geometry_concordance", m.phenotype_protein_mantel)):
+            if df is not None and not df.empty:
+                out[name] = df
     return {k: v for k, v in out.items() if v is not None}
 
 

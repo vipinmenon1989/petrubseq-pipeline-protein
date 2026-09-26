@@ -224,6 +224,24 @@ def main() -> int:
             check("lochNESS neighbours in PCA space", "umap" not in str(li.get("use_rep", "")).lower(), f"{li.get('use_rep')}, k={li.get('k_used')}")
         if "program_activity" in adata.obsm:
             check("program activity finite", bool(np.isfinite(np.asarray(adata.obsm["program_activity"], float)).all()), f"{adata.obsm['program_activity'].shape[1]} programs")
+        if "perturbation_distance" in adata.uns:
+            t = adata.uns["perturbation_distance"]
+            di = pe.get("distance", {})
+            ed = t["energy_distance"].astype(float)
+            check("perturbation distance table", {"target", "energy_distance", "pvalue", "fdr", "significant"} <= set(t.columns) and len(t) > 0, f"{len(t)} targets, {int((t['significant'].astype(str) == 'True').sum())} significant")
+            check("energy distances non-negative and ranked", bool((ed >= 0).all() and (ed.diff().dropna() <= 1e-12).all()))
+            check("distance representation is PCA-type", "umap" not in str(di.get("representation", "")).lower(), str(di.get("representation")))
+            check("DistanceTest p-values in [1/(B+1), 1]", bool(t["pvalue"].astype(float).dropna().between(1.0 / (float(di.get("n_permutations", 0)) + 1.0) - 1e-12, 1.0).all()), f"B={di.get('n_permutations')}")
+        if "perturbation_distance_matrix" in adata.uns:
+            M = np.asarray(adata.uns["perturbation_distance_matrix"], float)
+            check("pairwise distance matrix symmetric with zero diagonal", bool(M.shape[0] == M.shape[1] and np.allclose(M, M.T) and np.allclose(np.diag(M), 0)), f"{M.shape}")
+            if "phenotype_modules" in adata.uns:
+                pm = adata.uns["phenotype_modules"]
+                check("phenotype modules cover the distance-space targets", set(pm["target"].astype(str)) == set(adata.uns["perturbation_distance_matrix"].index.astype(str)), f"{pm['phenotype_module'].nunique()} modules")
+        if "master_perturbation_table" in adata.uns:
+            mt = adata.uns["master_perturbation_table"]
+            check("master perturbation table one row per target", bool(mt["target"].is_unique and len(mt) > 0), f"{len(mt)} targets x {mt.shape[1]} columns")
+            check("master table has no composite score", not any(("master_score" in c or "combined_score" in c) for c in mt.columns))
         if "protein_effects" in adata.uns:
             t = adata.uns["protein_effects"]
             check("protein effects on normalized values", pe.get("protein", {}).get("representation") != "protein_counts", str(pe.get("protein", {}).get("representation")))

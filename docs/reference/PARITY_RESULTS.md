@@ -314,7 +314,7 @@ and repeated pipeline runs. The repeat-run check on the Papalexi demo is recorde
 | run | config | cells | outcome |
 |---|---|---|---|
 | Papalexi demo | `config/demo_papalexi.yaml` | 1,800 | validator 79 checks, 0 FAIL, 1 WARN (no isotype control in the 4-antibody panel, documented); 9 Leiden clusters; strength 24/25 tested, 6 effective; enrichment 35 significant pairs; modules 25 x 753 genes; PS 24 scored; lochNESS 25; 212 figures (149 embedded) |
-| Papalexi full analysis | `config/analysis_papalexi_full.yaml` (job 20849348) | 17,473 | validator 79/0/1; 14 clusters; strength 25/25 tested, 16 effective; enrichment 122 significant; modules 25 x 1018; PS 25; 214 figures (149 embedded); 251 s |
+| Papalexi full analysis | `config/analysis_papalexi_full.yaml`, since renamed `config/analysis_eccite_seq_full.yaml` (job 20849348) | 17,473 | validator 79/0/1; 14 clusters; strength 25/25 tested, 16 effective; enrichment 122 significant; modules 25 x 1018; PS 25; 214 figures (149 embedded); 251 s |
 | SCP1064 regression | `config/scp1064.yaml` (job 20849346; analyses off, frozen v0.1 settings; run before the protein float64 change) | 218,331 | validator 60/0/0; vs v0.1 baseline: 58 identical, DIFF `X_umap_rna` / `varm[PCs]` (reference float64 PCA path, intentional), DIFF `X_umap_protein` (protein PCs differed by 1.8e-5 from float32 arpack run-to-run variation; resolved by the float64 protein path below), ADD haemoglobin QC columns + protein feature annotation columns |
 | SCP1064 smoke regression | `config/scp1064_smoke.yaml` | 4,500 | validator 60/0/1; vs v0.1: 61 identical, DIFF `X_pca` (7e-4) / `X_umap_rna` (intentional, as above), ADD hb columns |
 | SCP1064 full analysis | `config/analysis_scp1064.yaml` (job 20849347) | 218,027 | validator 79/0/0; 24 clusters; strength 213/248 tested, 151 effective; enrichment 248 x 24 x 2 arms, 122 significant; modules 246 x 1037, 9 modules / 4 programs; PS 213 scored (35 skipped), LDA on 101,184 cells; lochNESS 248 (k = 300); protein effects 139 significant; 1,225 figures (150 embedded); 85 min, 38.5 GB peak |
@@ -342,3 +342,37 @@ previous smoke run of the corrected code only `obsm['X_pca_protein']` (3.1e-5) a
 `obsm['X_umap_protein']` differ (the intentional dtype-path change); versus v0.1 the
 expected RNA and protein PCA/UMAP shifts plus the additive slots. RNA reference parity
 after the protein change: 96 MATCH, 0 DIFF, 0 MISSING.
+
+## Perturbation distance stages (reference stages 10–12; added 2026-09-26)
+
+Reference: `perturbseq-pipeline run --config config/parity_reference_papalexi_distance.yaml`
+(reference repository at commit `1c48f9d`, `distance` / `distance_space` / `meta_analysis` enabled
+with the reference defaults; SLURM job 20849823, 111 s) → `../results/parity/reference_papalexi_distance/`.
+Current: `petrubseq-protein run --config config/parity_papalexi_current_distance.yaml` (SLURM job
+20849869) → `../results/parity/current_papalexi_distance/`; comparison
+`../results/parity/parity_distance.md` (`scripts/reference_parity.py`, section DISTANCE).
+Audit of what is compared: docs/reference/PERTURBATION_DISTANCE_AUDIT.md.
+
+| state | MATCH | DIFF | MISSING |
+|---|---|---|---|
+| reference at `1c48f9d`, previously compared stages (QC … enrichment) | 96 | 0 | 0 |
+| distance stages (37 further items) | 37 | 0 | 0 |
+
+| item | result |
+|---|---|
+| tested targets and ranked order (21; BRD4, CUL3, MYC, SPI1 skipped below 30 cells) | identical |
+| energy distance vs control (21 targets, 199 non-targeting cells, `X_pca` 50 PCs) | max abs diff 4.5e-13 |
+| DistanceTest p-values (1,000 seeded permutations) and BH-FDR | identical (max diff 0) |
+| MMD (RBF, median bandwidth) | 2.0e-15 |
+| significant calls (7 of 21 at FDR < 0.05: JAK2, IFNGR1, STAT1, IFNGR2, SMAD4, IRF1, STAT2) | 21/21 equal |
+| pairwise 21 × 21 energy-distance matrix (symmetric, zero diagonal) | 2.7e-12 |
+| PCoA coordinates (10 axes, sign-aligned per axis) | 4.1e-12 |
+| nearest neighbours (210 rows: target, neighbour, rank; distances) | identical / 1.4e-12 |
+| phenotype modules (5, reference default cut) | ARI = NMI = 1, labels identical |
+| master table (`perturbation_meta.csv` vs `master_perturbation_table.csv`, 25 targets): order, `n_cells`, efficacy, PS, lochNESS, distance columns, module labels | identical (float32 lochNESS columns ≤ 2.2e-7) |
+
+The distance figures of the reference (`perturbation_distance_ranking`, `perturbation_atlas`,
+`ps_vs_distance_map`, `perturbation_phenotype_space`, `module_concordance`) are drawn from the same
+tables with the same transformations (docs/reference/PERTURBATION_DISTANCE_AUDIT.md §2.4).
+
+Re-run after the RNA ↔ protein level audit (docs/RNA_PROTEIN_LEVELS.md; current job 20849908, same reference run): 133 MATCH / 0 DIFF — the distance stages and the reference master-table columns are untouched by the audit.

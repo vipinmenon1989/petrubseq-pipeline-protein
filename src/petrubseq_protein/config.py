@@ -712,6 +712,79 @@ class PerturbationStrengthConfig:
 
 
 @dataclass
+class DistanceConfig:
+    """Perturbation distance vs control (reference ``distance.py`` stage 10; ``analysis/distance.py``).
+    Energy distance between a target's cells and the control cells in ``obsm[representation]``,
+    seeded label-permutation DistanceTest, BH-FDR across targets. Off by default, as in the
+    reference (``enabled: true`` turns it on)."""
+
+    enabled: bool = False
+    #: cell embedding used for every distance (reference: X_pca; never a UMAP)
+    representation: str = "X_pca"
+    #: the reference computes and tests the energy distance; ``mmd`` is the optional secondary metric
+    primary_metric: str = "edistance"
+    secondary_metric: Optional[str] = "mmd"
+    #: targets with fewer single-guide cells are skipped (reference 30)
+    min_cells: int = 30
+    #: deterministic bounded sampling (reference 2000 / 5000)
+    max_cells_per_target: int = 2000
+    max_control_cells: int = 5000
+    #: label permutations for the DistanceTest (reference 1000); 0 gives NaN p-values
+    n_permutations: int = 1000
+    #: reference seed 123: per-target seeds derive from it (sha256 of "<seed>_<index>_<target>")
+    random_seed: int = 123
+    fdr_threshold: float = 0.05
+    #: obs column whose levels are sampled proportionally when a group exceeds the caps; null =
+    #: uniform sampling (the reference falls back to its input lane id, one lane -> uniform)
+    stratify_by: Optional[str] = None
+
+
+@dataclass
+class DistanceSpaceConfig:
+    """Pairwise perturbation distance space (reference stage 11): target x target energy distances,
+    PCoA coordinates, nearest phenotypic neighbours and phenotype modules. Off by default (reference)."""
+
+    enabled: bool = False
+    metric: str = "edistance"
+    representation: str = "X_pca"
+    #: PCoA axes kept (at most the number of positive eigenvalues)
+    n_components: int = 10
+    nearest_neighbors: int = 10
+    #: average-linkage phenotype modules; ``n_modules`` null -> reference rule max(2, min(9, K // 4))
+    clustering: bool = True
+    n_modules: Optional[int] = None
+    cluster_distance_threshold: Optional[float] = None
+    linkage_method: str = "average"
+    min_cells: int = 30
+    max_cells_per_target: int = 2000
+    #: per-target seed = (random_seed + 43 * index) mod (2**31 - 1), index over the sorted target list (reference)
+    random_seed: int = 123
+    stratify_by: Optional[str] = None
+
+
+@dataclass
+class MasterTableConfig:
+    """Master perturbation table (reference stage 12 ``meta_analysis`` + ``visualization``) and the
+    protein extension (``tables/master_perturbation_table.csv``, ``master_perturbation_protein_table.csv``)."""
+
+    enabled: bool = True
+    #: reference atlas / map / space / concordance figures (reference ``visualization`` block)
+    perturbation_atlas: bool = True
+    ps_distance_map: bool = True
+    perturbation_space: bool = True
+    module_concordance: bool = True
+    atlas_top_n: int = 50
+    #: extension: distance <-> protein and phenotype-space <-> protein associations (needs protein effects)
+    protein_associations: bool = True
+    #: targets needed for a target-level Spearman / Mantel statistic
+    min_targets: int = 5
+    #: phenotype modules with fewer targets are excluded from the module-wise protein test
+    min_targets_per_module: int = 3
+    #: Mantel permutations (seeded with compute.seed)
+    mantel_permutations: int = 999
+
+
+@dataclass
 class PerturbationEffectsConfig:
     """Stage E: downstream perturbation-effect analyses on the processed object.
     On by default, as in the reference pipeline; the sub-analyses run when this
@@ -731,6 +804,10 @@ class PerturbationEffectsConfig:
     modules: ModulesAnalysisConfig = field(default_factory=ModulesAnalysisConfig)
     protein: ProteinEffectsConfig = field(default_factory=ProteinEffectsConfig)
     concordance: ConcordanceConfig = field(default_factory=ConcordanceConfig)
+    #: reference stages 10-12 (off by default in the reference; the master table is on)
+    distance: DistanceConfig = field(default_factory=DistanceConfig)
+    distance_space: DistanceSpaceConfig = field(default_factory=DistanceSpaceConfig)
+    master_table: MasterTableConfig = field(default_factory=MasterTableConfig)
     #: targets shown in the report figures (tables are always complete)
     top_n_report: int = 12
 
@@ -1014,6 +1091,27 @@ class Config:
             errs.append("analysis.perturbation_effects.ps.lda_n_pcs must be >= 2 and lda_max_genes >= 10 or null")
         if not pe.control_classes:
             errs.append("analysis.perturbation_effects.control_classes must name at least one control class")
+        dc, ds, mt = pe.distance, pe.distance_space, pe.master_table
+        _choice(errs, "analysis.perturbation_effects.distance.primary_metric", dc.primary_metric, ("edistance",))
+        if dc.secondary_metric is not None:
+            _choice(errs, "analysis.perturbation_effects.distance.secondary_metric", dc.secondary_metric, ("mmd",))
+        _choice(errs, "analysis.perturbation_effects.distance_space.metric", ds.metric, ("edistance", "mmd"))
+        _choice(errs, "analysis.perturbation_effects.distance_space.linkage_method", ds.linkage_method, ("average", "complete", "single", "ward", "weighted"))
+        for k, v in (("distance.min_cells", dc.min_cells), ("distance.max_cells_per_target", dc.max_cells_per_target), ("distance.max_control_cells", dc.max_control_cells), ("distance_space.n_components", ds.n_components),
+                     ("distance_space.nearest_neighbors", ds.nearest_neighbors), ("distance_space.min_cells", ds.min_cells), ("distance_space.max_cells_per_target", ds.max_cells_per_target), ("master_table.min_targets", mt.min_targets), ("master_table.atlas_top_n", mt.atlas_top_n), ("master_table.min_targets_per_module", mt.min_targets_per_module)):
+            if v < 1:
+                errs.append(f"analysis.perturbation_effects.{k} must be >= 1")
+        if dc.n_permutations < 0 or mt.mantel_permutations < 0:
+            errs.append("analysis.perturbation_effects.distance.n_permutations and master_table.mantel_permutations must be >= 0")
+        if not 0 < dc.fdr_threshold < 1:
+            errs.append("analysis.perturbation_effects.distance.fdr_threshold must be in (0, 1)")
+        if ds.n_modules is not None and ds.n_modules < 2:
+            errs.append("analysis.perturbation_effects.distance_space.n_modules must be >= 2 or null")
+        if ds.cluster_distance_threshold is not None and ds.cluster_distance_threshold <= 0:
+            errs.append("analysis.perturbation_effects.distance_space.cluster_distance_threshold must be > 0 or null")
+        for k, v in (("distance.representation", dc.representation), ("distance_space.representation", ds.representation)):
+            if "umap" in str(v).lower():
+                errs.append(f"analysis.perturbation_effects.{k} must be a PCA-type embedding, not a UMAP")
         cl = self.analysis.clustering
         if cl.resolution <= 0:
             errs.append("analysis.clustering.resolution must be > 0")

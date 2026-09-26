@@ -24,6 +24,7 @@ values tuned for a pleasing UMAP.
 | UMAP | `min_dist 0.5`, seed `run.seed = 0` | same (`umap.min_dist 0.5`, `spread 1.0`, `compute.seed 0`) |
 | clustering | Leiden 1.0 (igraph, 2 iterations, seed) before every analysis | same, as the first analysis stage (`analysis.clustering`) |
 | perturbation strength | target's own expression vs ntc / other controls, KS + MWU, BH, hit call | same (`analysis.perturbation_effects.strength`) |
+| perturbation distance / distance space / meta table | energy distance vs control + seeded permutation DistanceTest; pairwise matrix, PCoA, neighbours, phenotype modules; `perturbation_meta.csv` | same numbers (`analysis.perturbation_effects.distance` / `distance_space` / `master_table`; docs/PERTURBATION_DISTANCE.md) |
 | cluster enrichment | Fisher / CMH per target x cluster, both arms, primary `other` | same |
 | modules / programs | Leiden-marker panel, log2FC vs ntc (pseudocount 1e-9), Pearson/Spearman clustering, score_genes | same |
 | PS | pertps score, quadrants, LDA embedding | same maths re-implemented (no `pertps` dependency), same order / skipping / LDA |
@@ -221,6 +222,16 @@ docs/reference/PARITY_RESULTS.md).
 | `protein.representation` | `protein` | the primary normalized protein matrix (CLR of counts by default); never counts (*extension*) |
 | `protein.min_cells_per_target` / `min_control_cells` / `fdr_alpha` | 10 / 10 / 0.05 | same support rule as PS (*extension*) |
 | `concordance.min_cells` / `fdr_alpha` | 20 / 0.05 | minimum cells for a within-target Spearman correlation (*extension*) |
+| `distance.enabled` / `distance_space.enabled` / `master_table.enabled` | false / false / true | reference `distance` / `distance_space` / `meta_analysis` defaults (the demo and analysis configs enable the two distance stages) |
+| `distance.representation` / `primary_metric` / `secondary_metric` | X_pca / edistance / mmd | reference: energy distance in PCA space, RBF-MMD (median bandwidth) beside it |
+| `distance.min_cells` / `max_cells_per_target` / `max_control_cells` | 30 / 2000 / 5000 | reference bounded sampling (per-target seeds derived from `random_seed` by sha256) |
+| `distance.n_permutations` / `random_seed` / `fdr_threshold` | 1000 / 123 / 0.05 | reference DistanceTest: p = (1 + #perm ≥ obs) / (1 + B), BH across targets |
+| `distance.stratify_by` | null | obs column for proportional sampling above the caps (the reference falls back to its input lane id; one lane = uniform) |
+| `distance_space.metric` / `n_components` / `nearest_neighbors` | edistance / 10 / 10 | reference pairwise matrix, PCoA axes, neighbours per target |
+| `distance_space.clustering` / `n_modules` / `cluster_distance_threshold` / `linkage_method` | true / null / null / average | reference phenotype modules; null → `max(2, min(9, K // 4))` clusters |
+| `distance_space.min_cells` / `max_cells_per_target` / `random_seed` | 30 / 2000 / 123 | reference (per-target seed `random_seed + 43 × index`) |
+| `master_table.perturbation_atlas` / `ps_distance_map` / `perturbation_space` / `module_concordance` / `atlas_top_n` | true / true / true / true / 50 | reference `visualization` block |
+| `master_table.protein_associations` / `min_targets` / `mantel_permutations` / `min_targets_per_module` | true / 5 / 999 / 3 | distance ↔ protein Spearman (signed and |effect|), Mantel and module-wise tests (*extension*, descriptive; levels in docs/RNA_PROTEIN_LEVELS.md) |
 | `top_n_report` | 12 | targets whose per-target figures are embedded in the report (all are written to disk) |
 
 ## Cell states and perturbation × cluster enrichment (`analysis.clustering`; on by default)

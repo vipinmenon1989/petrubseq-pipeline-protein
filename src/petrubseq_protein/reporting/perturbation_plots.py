@@ -682,6 +682,17 @@ def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
                 ax.set_xlabel("PS", fontsize=8); ax.set_ylabel(f"{r['protein']} (CLR)", fontsize=8)
             fig.tight_layout()
             reg.save(fig, "ps_vs_protein", SECTION, ST_CONC, "PS vs protein (within target)", "Per-cell PS vs protein value inside one target's perturbed cells, for the pairs with the lowest FDR; red = binned-median trend (visual aid). The statistic is the within-target Spearman rho in ps_protein_association.csv.")
+    # --- lochNESS <-> protein (cell level, within target) ----------------------------------------
+    lc = getattr(co, "lochness_protein_cells", None)
+    if lc is not None and not lc.empty:
+        R = lc.pivot(index="target", columns="protein", values="spearman_rho")
+        Fq = lc.pivot(index="target", columns="protein", values="fdr").reindex(index=R.index, columns=R.columns) < alpha_c
+        R = R.loc[R.abs().max(axis=1).sort_values(ascending=False).index]
+        fig, ax = plt.subplots(figsize=(1.8 + 0.7 * R.shape[1], 1.2 + 0.2 * R.shape[0]))
+        _heatmap(ax, R, label="Spearman rho (lochNESS vs protein, within target)", marks=Fq.loc[R.index, R.columns])
+        ax.set_title("lochNESS <-> protein (cell level, within target)", fontsize=9)
+        fig.tight_layout()
+        reg.save(fig, "lochness_protein_heatmap", SECTION, ST_CONC, "lochNESS vs protein association heatmap (cell level)", f"Within each target's perturbed cells, Spearman correlation between the cell's own-target lochNESS score and each protein; * = BH-FDR < {alpha_c} over the within-target tests (lochness_protein_associations.csv, CELL_LEVEL).")
     # --- lochNESS <-> protein (target level) -----------------------------------------------------
     lp, lps = co.lochness_protein, co.lochness_protein_summary
     if lp is not None and not lp.empty and lps is not None and not lps.empty:
@@ -700,7 +711,7 @@ def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
             despine(ax)
         fig.suptitle(f"lochNESS <-> protein across {int(lps['n_targets'].iloc[0])} targets (target level)", fontsize=10)
         fig.tight_layout()
-        reg.save(fig, "lochness_vs_protein", SECTION, ST_CONC, "lochNESS vs protein effect (target level)", "Per protein: each target's own-cell mean lochNESS (does the perturbation occupy a distinct transcriptomic neighbourhood) against its protein effect; Spearman across targets for the signed and the absolute effect (lochness_protein_summary.csv). lochNESS is a population quantity, so no cell-level correlation is computed.")
+        reg.save(fig, "lochness_vs_protein", SECTION, ST_CONC, "lochNESS vs protein effect (target level)", "Per protein: each target's own-cell mean lochNESS against its protein effect; Spearman across targets (n = targets) for the signed and the absolute effect (lochness_protein_summary.csv, TARGET_LEVEL). The cell-level within-target statistic is the separate heatmap above; the two levels are never combined.")
     # --- program <-> protein: cell level and target level, kept apart -----------------------------
     ppc, ppt = co.program_protein_cells, co.program_protein_targets
     panels = []
@@ -767,8 +778,11 @@ def protein_figures(res, adata, cfg, reg: FigureRegistry) -> None:
 
 
 def perturbation_effect_figures(res, adata, cfg, reg: FigureRegistry) -> None:
-    """Reference order: modules / programs, PS, lochNESS; then the protein extension."""
+    """Reference order: modules / programs, PS, lochNESS, distance / distance space / atlas; then the protein extension."""
+    from .distance_plots import distance_figures
+
     modules_figures(res.modules, adata, cfg, reg)
     ps_figures(res.ps, res.ps_vs_strength, res.strength, adata, cfg, reg)
     lochness_figures(res.lochness, adata, cfg, reg)
+    res.module_concordance = distance_figures(res, adata, cfg, reg)
     protein_figures(res, adata, cfg, reg)

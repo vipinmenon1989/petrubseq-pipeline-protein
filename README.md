@@ -88,14 +88,26 @@ nearest neighbours in PCA space (Huang et al. 2023): self-enrichment ranking,
 distributions, mean per cluster, self score on the UMAP and one map per
 perturbation. Cluster enrichment and lochNESS are shown side by side, never combined.
 
-**10 · Protein extension** *(needs protein)*. Per target × protein: CLR mean
+**10 · Perturbation distance, distance space and phenotype modules** *(reference
+stages 10–11; off by default as in the reference, enabled in the demo and analysis
+configs)*. Energy distance between each target's cells and the controls in PCA space
+with a seeded permutation DistanceTest and BH-FDR; the target × target distance matrix,
+its PCoA phenotype space, nearest phenotypic neighbours and average-linkage **phenotype
+modules** (cell-state similarity, compared with the gene-effect modules by ARI / NMI);
+ranking, atlas, PS-vs-distance map and phenotype-space figures. The **master
+perturbation table** (`tables/master_perturbation_table.csv`) consolidates every
+target-level result without a composite score. docs/PERTURBATION_DISTANCE.md.
+
+**11 · Protein extension** *(needs protein)*. Per target × protein: CLR mean
 difference, Cohen's d, Mann–Whitney p, BH-FDR, sign consistency per sample and per
 guide. Concordance: PS ↔ protein within target, lochNESS ↔ protein across targets,
-program activity ↔ protein per cell and per target, plus one integrated table.
-Associations only.
+program activity ↔ protein per cell and per target, distance ↔ protein across targets
+(signed and absolute) and phenotype space ↔ protein (Mantel, module-wise), the
+integrated table and the target × protein master table with every statistic labelled
+CELL_LEVEL or TARGET_LEVEL. Associations only.
 
-Stages 5–9 reproduce the reference `weili-lab/perturbseq-pipeline` numerically
-(docs/reference/PARITY_RESULTS.md); stage 10 is the multimodal addition.
+Stages 5–10 reproduce the reference `weili-lab/perturbseq-pipeline` numerically
+(docs/reference/PARITY_RESULTS.md); stage 11 is the multimodal addition.
 
 ---
 
@@ -298,7 +310,7 @@ src/petrubseq_protein/   io (adapters, readers, tenx, h5ad) · validation · pre
                          · reporting (figures, plots, html, markdown) · pipeline · cli · config
 config/                  demo_papalexi.yaml · scp1064*.yaml · examples/ (mtx, multilane, h5ad_perturbseq, h5ad_perturb_cite_seq, ...)
 demo/                    data/papalexi_eccite (bundled subset) · fetch/prepare/check scripts
-docs/                    DEFAULTS · OUTPUTS · PROCESSED_OBJECT · CELL_STATES · PERTURBATION_EFFECTS · REGRESSION · HPC · datasets/ · reference/
+docs/                    DEFAULTS · OUTPUTS · PROCESSED_OBJECT · CELL_STATES · PERTURBATION_EFFECTS · PERTURBATION_DISTANCE · RNA_PROTEIN_LEVELS · REGRESSION · HPC · datasets/ · reference/
 scripts/                 validate_processed · compare_processed · compare_reference_perturbation
 slurm/                   job scripts (docs/HPC.md)
 tests/                   synthetic generator + tests

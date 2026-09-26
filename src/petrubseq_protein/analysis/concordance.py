@@ -8,17 +8,21 @@ Three associations, kept at the level where each quantity is defined:
   tests. A separate ``pooled`` row (all perturbed cells of all targets) is
   reported only as a descriptive number and flagged, because pooling unrelated
   perturbations mixes between-target with within-target variation.
-* **lochNESS <-> protein** (target level): lochNESS is a population property,
-  so the association is across targets: per protein, Spearman between the
-  targets' own-cell mean lochNESS and their protein effect (and |effect|).
-  A cell-level within-target correlation is *not* computed.
+* **lochNESS <-> protein** at two levels, kept apart: (cell level, *within* a
+  target) Spearman between each perturbed cell's own-target lochNESS score
+  (``obsm['lochness'][t]``, the local enrichment of target t around that cell)
+  and its protein value, BH-FDR over the within-target tests; and (target
+  level) per protein, Spearman across targets between the own-cell mean
+  lochNESS and the target's protein effect (and |effect|). The target-level
+  summary is never copied onto cells.
 * **gene program <-> protein**: cell level over all single-guide cells
   (Spearman of program activity vs protein value, per program x protein),
   and target level (Spearman across targets of the perturbation x program
   effect vs the perturbation x protein effect).
 
 None of these establishes mediation or causality; they describe whether the
-quantities co-vary in the analysed cells.
+quantities co-vary in the analysed cells. Every table carries an
+``analysis_level`` column (CELL_LEVEL / TARGET_LEVEL; docs/RNA_PROTEIN_LEVELS.md).
 """
 
 from __future__ import annotations
@@ -40,16 +44,20 @@ from .ps_score import PSResults
 
 logger = logging.getLogger(__name__)
 
+CELL_LEVEL = "CELL_LEVEL"
+TARGET_LEVEL = "TARGET_LEVEL"
+
 
 @dataclass
 class ConcordanceResults:
-    ps_protein: pd.DataFrame
-    lochness_protein: pd.DataFrame
-    lochness_protein_summary: pd.DataFrame
-    program_protein_cells: pd.DataFrame
-    program_protein_targets: pd.DataFrame
-    summary: pd.DataFrame           # integrated target-level table
+    ps_protein: pd.DataFrame                # CELL_LEVEL within target (+ descriptive pooled rows)
+    lochness_protein: pd.DataFrame          # TARGET_LEVEL long table (own-cell mean lochNESS, protein effect)
+    lochness_protein_summary: pd.DataFrame  # TARGET_LEVEL Spearman across targets per protein
+    program_protein_cells: pd.DataFrame     # CELL_LEVEL
+    program_protein_targets: pd.DataFrame   # TARGET_LEVEL
+    summary: pd.DataFrame                   # integrated target-level table
     info: Dict[str, Any] = field(default_factory=dict)
+    lochness_protein_cells: pd.DataFrame = field(default_factory=pd.DataFrame)   # CELL_LEVEL within target
 
 
 def _status(n: int, rho: float, fdr: float, alpha: float, min_n: int) -> str:
@@ -91,7 +99,25 @@ def compute_concordance(adata: ad.AnnData, cfg: Config, ps: Optional[PSResults],
         ps_prot["fdr"] = np.nan
         ps_prot.loc[w, "fdr"] = bh_fdr(ps_prot.loc[w, "p_value"].to_numpy())
         ps_prot["status"] = [_status(n, r, f, cc.fdr_alpha, cc.min_cells) if s == "within_target" else "descriptive_pooled" for n, r, f, s in zip(ps_prot["n_cells"], ps_prot["spearman_rho"], ps_prot["fdr"], ps_prot["scope"])]
+        ps_prot["analysis_level"] = np.where(ps_prot["scope"] == "within_target", CELL_LEVEL, CELL_LEVEL + "_POOLED_DESCRIPTIVE")
         ps_prot = ps_prot.sort_values(["scope", "fdr", "target"], na_position="last").reset_index(drop=True)
+    # --- lochNESS <-> protein (cell level, within target) --------------------------------
+    lc_rows = []
+    if loch is not None and not loch.summary.empty and P is not None and not loch.scores.empty:
+        for t in loch.summary["target"]:
+            if t not in loch.scores.columns or t not in groups.perturbed:
+                continue
+            pm = groups.mask(t) & has
+            x = loch.scores.loc[pm, t].to_numpy(float)          # the cell's own-target lochNESS score (varies cell by cell)
+            for p in proteins:
+                rho, pv = spearman(x, P.loc[pm, p].to_numpy(float))
+                lc_rows.append({"scope": "within_target", "target": t, "protein": p, "n_cells": int(pm.sum()), "spearman_rho": rho, "p_value": pv})
+    loch_cells = pd.DataFrame(lc_rows)
+    if not loch_cells.empty:
+        loch_cells["fdr"] = bh_fdr(loch_cells["p_value"].to_numpy())
+        loch_cells["status"] = [_status(n, r, f, cc.fdr_alpha, cc.min_cells) for n, r, f in zip(loch_cells["n_cells"], loch_cells["spearman_rho"], loch_cells["fdr"])]
+        loch_cells["analysis_level"] = CELL_LEVEL
+        loch_cells = loch_cells.sort_values(["fdr", "target"], na_position="last").reset_index(drop=True)
     # --- lochNESS <-> protein (target level) -----------------------------------------
     lp_rows, lps_rows = [], []
     if loch is not None and not loch.summary.empty and prot is not None and not prot.empty:
@@ -110,10 +136,14 @@ def compute_concordance(adata: ad.AnnData, cfg: Config, ps: Optional[PSResults],
                 r2, p2 = spearman(x, np.abs(y))
                 lps_rows.append({"protein": p, "n_targets": len(common), "rho_lochness_vs_effect": r1, "p_lochness_vs_effect": p1, "rho_lochness_vs_abs_effect": r2, "p_lochness_vs_abs_effect": p2})
     lp = pd.DataFrame(lp_rows)
+    if not lp.empty:
+        lp["analysis_level"] = TARGET_LEVEL
     lps = pd.DataFrame(lps_rows)
     if not lps.empty:
+        lps["fdr_signed_effect"] = bh_fdr(lps["p_lochness_vs_effect"].to_numpy())
         lps["fdr_abs_effect"] = bh_fdr(lps["p_lochness_vs_abs_effect"].to_numpy())
         lps["support"] = np.where(lps["n_targets"] >= 10, "ok", "few_targets(<10)")
+        lps["analysis_level"] = TARGET_LEVEL
     # --- program <-> protein ---------------------------------------------------------
     pp_cells, pp_targets = [], []
     if mods is not None and not mods.empty and mods.program_activity is not None and P is not None:
@@ -140,11 +170,13 @@ def compute_concordance(adata: ad.AnnData, cfg: Config, ps: Optional[PSResults],
     if not ppc.empty:
         ppc["fdr"] = bh_fdr(ppc["p_value"].to_numpy())
         ppc["status"] = [_status(n, r, f, cc.fdr_alpha, cc.min_cells) for n, r, f in zip(ppc["n_cells"], ppc["spearman_rho"], ppc["fdr"])]
+        ppc["analysis_level"] = CELL_LEVEL
         ppc = ppc.sort_values("fdr", na_position="last").reset_index(drop=True)
     ppt = pd.DataFrame(pp_targets)
     if not ppt.empty:
         ppt["fdr"] = bh_fdr(ppt["p_value"].to_numpy())
         ppt["status"] = [_status(n, r, f, cc.fdr_alpha, 5) for n, r, f in zip(ppt["n_targets"], ppt["spearman_rho"], ppt["fdr"])]
+        ppt["analysis_level"] = TARGET_LEVEL
         ppt = ppt.sort_values("fdr", na_position="last").reset_index(drop=True)
     # --- integrated target-level summary ---------------------------------------------
     srows = []
@@ -177,15 +209,23 @@ def compute_concordance(adata: ad.AnnData, cfg: Config, ps: Optional[PSResults],
                 best = w.loc[w["spearman_rho"].abs().idxmax()] if w["spearman_rho"].notna().any() else None
                 if best is not None:
                     row["ps_protein_best"] = f"{best['protein']} rho={best['spearman_rho']:+.2f} fdr={best['fdr']:.2g}"
+        if not loch_cells.empty:
+            w = loch_cells[loch_cells["target"] == t]
+            if not w.empty and w["spearman_rho"].notna().any():
+                best = w.loc[w["spearman_rho"].abs().idxmax()]
+                row["lochness_protein_best"] = f"{best['protein']} rho={best['spearman_rho']:+.2f} fdr={best['fdr']:.2g}"
         srows.append(row)
     summary = pd.DataFrame(srows)
     if not summary.empty:
         summary = summary.sort_values("n_cells", ascending=False).reset_index(drop=True)
-    info = {"ps_protein": "Spearman within target (perturbed cells), BH-FDR; pooled rows descriptive only", "lochness_protein": "target-level Spearman across targets per protein (own-cell mean lochNESS vs protein effect and |effect|)",
+    info = {"ps_protein": "CELL_LEVEL: Spearman within target (perturbed cells: per-cell PS vs per-cell protein), BH-FDR; pooled rows descriptive only",
+            "lochness_protein_cells": "CELL_LEVEL: Spearman within target (per-cell own-target lochNESS vs per-cell protein), BH-FDR",
+            "lochness_protein": "TARGET_LEVEL: Spearman across targets per protein (own-cell mean lochNESS vs protein effect and |effect|)",
+            "n_lochness_protein_cell_tests": int(len(loch_cells)), "n_lochness_protein_cell_significant": int((loch_cells["status"] == "significant").sum()) if not loch_cells.empty else 0,
             "program_protein": "cell-level Spearman over single-guide + control cells; target-level Spearman of program effect vs protein effect", "min_cells": cc.min_cells, "fdr_alpha": cc.fdr_alpha,
             "n_ps_protein_tests": int((ps_prot["scope"] == "within_target").sum()) if not ps_prot.empty else 0,
             "n_ps_protein_significant": int(((ps_prot["scope"] == "within_target") & (ps_prot["status"] == "significant")).sum()) if not ps_prot.empty else 0,
             "n_program_protein_cell_tests": int(len(ppc)), "n_program_protein_cell_significant": int((ppc["status"] == "significant").sum()) if not ppc.empty else 0,
             "n_program_protein_target_significant": int((ppt["status"] == "significant").sum()) if not ppt.empty else 0, "caveat": "associations, not mediation or causality"}
     logger.info("concordance: %d PS-protein tests (%d significant), %d program-protein cell tests (%d significant)", info["n_ps_protein_tests"], info["n_ps_protein_significant"], info["n_program_protein_cell_tests"], info["n_program_protein_cell_significant"])
-    return ConcordanceResults(ps_prot, lp, lps, ppc, ppt, summary, info)
+    return ConcordanceResults(ps_prot, lp, lps, ppc, ppt, summary, info, loch_cells)

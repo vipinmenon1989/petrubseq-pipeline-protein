@@ -15,7 +15,9 @@ PCA (sign-invariant), Leiden labels (ARI / NMI), perturbation strength (effect
 sizes, p-values, FDR, hit calls, ranks), PS (per-cell scores, per-target summary,
 quadrant classes), lochNESS (per-cell scores, summaries, ranking, top cluster),
 modules (effect matrix, perturbation correlation, module / program partitions,
-program activity) and cluster enrichment (odds ratios, p-values, FDR, calls).
+program activity), cluster enrichment (odds ratios, p-values, FDR, calls) and, when both
+runs enable them, the perturbation-distance stages (control energy distance, DistanceTest
+p-values / FDR / calls, pairwise matrix, PCoA, nearest neighbours, phenotype modules, master table).
 Exact equality where the quantity is discrete, absolute tolerance where floating
 point applies, ARI / NMI for label partitions. Missing outputs are reported as
 MISSING rather than silently skipped.
@@ -389,6 +391,82 @@ def main() -> int:
                 jj = [c for c in tr.columns if c in tc_.columns and pd.api.types.is_numeric_dtype(tr[c])]
                 if len(ii) and jj:
                     _num_diff(S, name, tr.loc[ii, jj].to_numpy(dtype=float), tc_.loc[ii, jj].to_numpy(dtype=float), 1e-6)
+
+    # ------------------------------------------------------------- distance
+    # reference stages 10-12 (distance.py / meta.py); the reference run must have
+    # distance / distance_space / meta_analysis enabled (config/parity_reference_papalexi_distance.yaml)
+    S = "DISTANCE"
+    dr = _read(rt / "perturbation_distance.csv")
+    dc = _read(ct / "perturbation_distance" / "perturbation_distance.csv")
+    if dr is None and dc is None:
+        rec(S, "perturbation distance", "not run on either side", "SKIPPED", "enable distance / distance_space on both sides to compare")
+    elif dr is None or dc is None:
+        rec(S, "perturbation distance", f"ref={'present' if dr is not None else 'absent'} cur={'present' if dc is not None else 'absent'}", "MISSING")
+    else:
+        dr = dr.rename(columns={"target_gene": "target"})
+        _exact(S, "tested targets (ranked order)", dr["target"], dc["target"], "sorted by energy distance, descending")
+        m = dr.merge(dc, on="target", suffixes=("_r", "_c"))
+        for c in ("n_cells", "n_control", "energy_distance", "pvalue", "fdr", "mmd_distance"):
+            if f"{c}_r" in m.columns and f"{c}_c" in m.columns:
+                _num_diff(S, f"control distance: {c}", m[f"{c}_r"], m[f"{c}_c"], tol, "energy distance = pertpy Edistance formula; p = (1 + #perm >= obs) / (1 + B), seeded" if c == "pvalue" else "")
+            else:
+                rec(S, f"control distance: {c}", "n/a", "MISSING")
+        _exact(S, "control distance: significant", m["significant_r"].astype(str), m["significant_c"].astype(str))
+        sr, sc_ = _read(rt / "distance_skipped.csv"), _read(ct / "perturbation_distance" / "distance_skipped.csv")
+        if sr is not None and sc_ is not None:
+            _exact(S, "skipped targets", sorted(sr.iloc[:, 0].astype(str)), sorted(sc_["target"].astype(str)))
+        else:
+            rec(S, "skipped targets", f"ref={0 if sr is None else len(sr)} cur={0 if sc_ is None else len(sc_)}", "MATCH" if (sr is None) == (sc_ is None) else "DIFF")
+    mr = (rt / "perturbation_distance_matrix.tsv")
+    mc = ct / "perturbation_distance" / "perturbation_distance_matrix.csv"
+    if mr.is_file() and mc.is_file():
+        Mr = pd.read_csv(mr, sep="\t", index_col=0)
+        Mc = pd.read_csv(mc, index_col=0)
+        rec(S, "pairwise matrix targets", f"ref={len(Mr)} cur={len(Mc)}", "MATCH" if set(Mr.index) == set(Mc.index) else "DIFF")
+        ii = [t for t in Mr.index if t in Mc.index]
+        A, B = Mr.loc[ii, ii].to_numpy(float), Mc.loc[ii, ii].to_numpy(float)
+        _num_diff(S, "pairwise energy distance matrix", A, B, tol)
+        rec(S, "pairwise matrix symmetric, zero diagonal", f"max asym={np.abs(B - B.T).max():.2g} max diag={np.abs(np.diag(B)).max():.2g}", "MATCH" if np.abs(B - B.T).max() < 1e-9 and np.abs(np.diag(B)).max() < 1e-9 else "DIFF")
+        cr, cc2 = _read(rt / "perturbation_space_coordinates.csv"), _read(ct / "perturbation_distance" / "perturbation_space_coordinates.csv")
+        if cr is not None and cc2 is not None:
+            cr = cr.rename(columns={"target_gene": "target"}).set_index("target")
+            cc2 = cc2.set_index("target").loc[cr.index]
+            axes = [c for c in cr.columns if c.startswith("PCoA") and c in cc2.columns]
+            A, B = cr[axes].to_numpy(float), cc2[axes].to_numpy(float)
+            sign = np.sign((A * B).sum(0)); sign[sign == 0] = 1
+            _num_diff(S, f"PCoA coordinates ({len(axes)} axes, sign-aligned per axis)", A, B * sign, 1e-5, "eigenvector signs are arbitrary")
+        else:
+            rec(S, "PCoA coordinates", "n/a", "MISSING")
+        nr, nc = _read(rt / "perturbation_neighbors.csv"), _read(ct / "perturbation_distance" / "perturbation_neighbors.csv")
+        if nr is not None and nc is not None and len(nr) == len(nc):
+            _exact(S, "nearest neighbours (target, neighbour, rank)", nr["target"] + "|" + nr["neighbor"] + "|" + nr["rank"].astype(str), nc["target"] + "|" + nc["neighbor"] + "|" + nc["rank"].astype(str))
+            _num_diff(S, "nearest neighbour distances", nr["distance"], nc["distance"], tol)
+        else:
+            rec(S, "nearest neighbours", f"ref={0 if nr is None else len(nr)} cur={0 if nc is None else len(nc)} rows", "MISSING" if nr is None or nc is None else "DIFF")
+        pr, pc_ = _read(rt / "phenotype_modules.csv"), _read(ct / "perturbation_distance" / "phenotype_modules.csv")
+        if pr is not None and pc_ is not None:
+            pr = pr.rename(columns={"target_gene": "target"}).set_index("target")["phenotype_module"]
+            pc_ = pc_.set_index("target")["phenotype_module"]
+            _partition(S, "phenotype modules (partition)", pr, pc_)
+            _exact(S, "phenotype module labels", pr.loc[pr.index], pc_.loc[pr.index], "same average-linkage cut, same PM numbering")
+        else:
+            rec(S, "phenotype modules", "n/a", "MISSING")
+    elif mr.is_file() or mc.is_file():
+        rec(S, "pairwise matrix", f"ref={'present' if mr.is_file() else 'absent'} cur={'present' if mc.is_file() else 'absent'}", "MISSING")
+    tr_, tc2 = _read(rt / "perturbation_meta.csv"), _read(ct / "master_perturbation_table.csv")
+    if tr_ is not None and tc2 is not None:
+        tr_ = tr_.rename(columns={"target_gene": "target"})
+        _exact(S, "master table targets (order)", tr_["target"], tc2["target"], "reference: sorted by energy distance, NaN last")
+        m = tr_.merge(tc2, on="target", suffixes=("_r", "_c"))
+        for c in [c for c in tr_.columns if c != "target"]:
+            if f"{c}_c" not in m.columns:
+                rec(S, f"master table: {c}", "n/a", "MISSING")
+            elif pd.api.types.is_numeric_dtype(tr_[c]) and not pd.api.types.is_bool_dtype(tr_[c]):
+                _num_diff(S, f"master table: {c}", m[f"{c}_r"], m[f"{c}_c"], tol)
+            else:
+                _exact(S, f"master table: {c}", m[f"{c}_r"].astype(str).replace({"nan": "", "<NA>": ""}), m[f"{c}_c"].astype(str).replace({"nan": "", "<NA>": ""}))
+    elif tr_ is not None or tc2 is not None:
+        rec(S, "master perturbation table", f"ref={'present' if tr_ is not None else 'absent'} cur={'present' if tc2 is not None else 'absent'}", "MISSING")
 
     # ---------------------------------------------------------------- write
     df = pd.DataFrame(ROWS)
