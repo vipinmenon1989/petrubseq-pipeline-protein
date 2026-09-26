@@ -128,3 +128,17 @@ analysis:
       min_cells_per_target: 10
     concordance:
       min_cells: 20
+  # Stage F: Leiden cell states on the RNA neighbour graph and perturbation x
+  # cluster enrichment (off by default in generic configs).
+  clustering:
+    enabled: true
+    key: leiden
+    resolution: 1.0                      # reference default; not tuned for this dataset
+    n_iterations: 2                      # reference default
+    enrichment:
+      control: non_targeting             # single-guide NT cells (the reference pipeline defaults to all other targets)
+      control_classes: [non_targeting]
+      min_cells_per_target: 10
+      min_cells_per_cluster: 20
+      stratify_by: sample                # the 3 hashed samples: adds a CMH test beside the Fisher test
+      n_permutations: 1000

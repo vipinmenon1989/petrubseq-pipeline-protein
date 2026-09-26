@@ -49,3 +49,14 @@ ADD/NOTE must be explainable by the change being tested.
 | validator | 60 checks, 0 FAIL, 1 WARN (protein PCA variance 78 %) | 60 checks, 0 FAIL, 0 WARN |
 | compare vs v0.1 | 67 slots, 0 DIFF, 1 ADD, 1 NOTE | 67 slots, 0 DIFF, 1 ADD, 1 NOTE |
 | run | 78 s, 6 warnings | job 20846621: 24 min, 23.5 GB peak, 7 warnings |
+
+## Stage record
+
+| stage | content | validation |
+|---|---|---|
+| A | software / data / results separation | smoke identical to v0.1 |
+| B | lifecycle, QC filtering, reports | smoke + full: 0 DIFF vs v0.1 |
+| C | input adapters, guide calling | smoke + full: 0 DIFF vs v0.1; cross-format equivalence |
+| D | Papalexi demo, bundled | deterministic preparation; validator 0 FAIL |
+| E | PS, lochNESS, programs / modules, protein effects, concordance (optional) | reference agreement; smoke 0 DIFF with analyses off |
+| F | Leiden cell states, perturbation × cluster enrichment (optional) | smoke 0 DIFF with clustering off; see the Stage F completion report |

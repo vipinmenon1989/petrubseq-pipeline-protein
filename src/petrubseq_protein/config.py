@@ -665,8 +665,56 @@ class PerturbationEffectsConfig:
 
 
 @dataclass
+class ClusterEnrichmentConfig:
+    """Perturbation x cluster enrichment (``analysis/cluster_enrichment.py``)."""
+
+    enabled: bool = True
+    #: ``non_targeting``: single-guide cells of ``control_classes`` (default);
+    #: ``other``: single-guide targeting cells of every other target (explicit
+    #: alternative, the default of weili-lab/perturbseq-pipeline)
+    control: str = "non_targeting"
+    control_classes: List[str] = field(default_factory=lambda: ["non_targeting"])
+    min_cells_per_target: int = 10
+    #: clusters smaller than this are not tested
+    min_cells_per_cluster: int = 20
+    min_control_cells: int = 10
+    #: pairs with fewer control cells in the cluster are flagged ``low_power``
+    min_control_cells_in_cluster: int = 10
+    #: guides with at least this many cells enter the guide-support count
+    min_cells_per_guide: int = 5
+    #: Haldane-Anscombe pseudocount for the finite log2 odds ratio (display/ranking only)
+    odds_pseudocount: float = 0.5
+    fdr_alpha: float = 0.05
+    #: optional obs column (e.g. sample, lane): adds a Cochran-Mantel-Haenszel test across its levels
+    stratify_by: Optional[str] = None
+    #: label permutations for the omnibus target x cluster chi-square (0 disables)
+    n_permutations: int = 1000
+    top_n_report: int = 12
+
+
+@dataclass
+class ClusteringConfig:
+    """Stage F: Leiden clustering of the RNA neighbour graph plus perturbation x
+    cluster enrichment. Off by default; independent of ``perturbation_effects``."""
+
+    enabled: bool = False
+    #: obs column for the cluster labels
+    key: str = "leiden"
+    #: Leiden resolution (higher -> more clusters); reference default 1.0
+    resolution: float = 1.0
+    #: Leiden iterations (reference 2; -1 = until convergence)
+    n_iterations: int = 2
+    #: the RNA neighbour graph built in the representation stage
+    neighbors_key: str = "rna"
+    #: overwrite an existing obs column named ``key`` (otherwise an error)
+    overwrite: bool = False
+    enrichment: ClusterEnrichmentConfig = field(default_factory=ClusterEnrichmentConfig)
+
+
+@dataclass
 class AnalysisConfig:
     perturbation_effects: PerturbationEffectsConfig = field(default_factory=PerturbationEffectsConfig)
+    clustering: ClusteringConfig = field(default_factory=ClusteringConfig)
 
 
 @dataclass
@@ -866,6 +914,22 @@ class Config:
             errs.append("analysis.perturbation_effects.lochness.max_k_fraction must be in (0, 1]")
         if not pe.control_classes:
             errs.append("analysis.perturbation_effects.control_classes must name at least one control class")
+        cl = self.analysis.clustering
+        if cl.resolution <= 0:
+            errs.append("analysis.clustering.resolution must be > 0")
+        if cl.n_iterations == 0 or cl.n_iterations < -1:
+            errs.append("analysis.clustering.n_iterations must be >= 1 or -1 (until convergence)")
+        if not str(cl.key).strip():
+            errs.append("analysis.clustering.key must be a non-empty obs column name")
+        ce = cl.enrichment
+        _choice(errs, "analysis.clustering.enrichment.control", ce.control, ("non_targeting", "other"))
+        if ce.control == "non_targeting" and not ce.control_classes:
+            errs.append("analysis.clustering.enrichment.control_classes must name at least one control class")
+        for k, v in (("min_cells_per_target", ce.min_cells_per_target), ("min_cells_per_cluster", ce.min_cells_per_cluster), ("min_control_cells", ce.min_control_cells), ("min_cells_per_guide", ce.min_cells_per_guide)):
+            if v < 1:
+                errs.append(f"analysis.clustering.enrichment.{k} must be >= 1")
+        if ce.odds_pseudocount < 0 or not 0 < ce.fdr_alpha < 1 or ce.n_permutations < 0:
+            errs.append("analysis.clustering.enrichment: odds_pseudocount >= 0, 0 < fdr_alpha < 1 and n_permutations >= 0 are required")
         if "baselines" in Path(self.output.dir).expanduser().parts:
             errs.append(f"output.dir {self.output.dir!r} lies under a 'baselines' directory, which holds immutable regression references (docs/REGRESSION.md); choose another output directory")
         if errs:

@@ -41,7 +41,7 @@
 <header>
   <h1>{{ ctx.title }}</h1>
   <div class="sub">Run <b>{{ ctx.run_name }}</b> (dataset {{ ctx.dataset }}) &middot; generated {{ ctx.generated_at }} &middot; petrubseq-pipeline-protein v{{ ctx.version }} &middot; preprocessing / QC report</div>
-  <nav><a href="#summary">Summary</a><a href="#inputs">1. Inputs</a><a href="#qc-rna">2. Cell &amp; RNA QC</a><a href="#qc-protein">3. Protein QC</a><a href="#qc-pert">4. Perturbation QC</a><a href="#rep">5. Representations</a>{% if pe %}<a href="#pe">6. Perturbation effects</a>{% endif %}<a href="#outputs">{{ 7 if pe else 6 }}. Outputs &amp; provenance</a></nav>
+  <nav><a href="#summary">Summary</a><a href="#inputs">1. Inputs</a><a href="#qc-rna">2. Cell &amp; RNA QC</a><a href="#qc-protein">3. Protein QC</a><a href="#qc-pert">4. Perturbation QC</a><a href="#rep">5. Representations</a>{% if pe %}<a href="#pe">{{ secn.pe }}. Perturbation effects</a>{% endif %}{% if cs %}<a href="#cs">{{ secn.cs }}. Cell states</a>{% endif %}<a href="#outputs">{{ secn.out }}. Outputs &amp; provenance</a></nav>
 </header>
 
 <h2 id="summary">Run summary</h2>
@@ -83,16 +83,26 @@
 {% for name, df in group_summaries %}<h3>{{ name }} summary</h3><div class="scroll">{{ df }}</div>{% endfor %}
 
 {% if pe %}
-<h2 id="pe">6. Perturbation effects</h2>
+<h2 id="pe">{{ secn.pe }}. Perturbation effects</h2>
 <p class="sub">Downstream analyses on the processed object. Perturbed cells = single-guide targeting cells of one target; controls = single-guide non-targeting cells; ambiguous and multi-guide cells are excluded. <b>Perturbation target</b> = the gene the guide acts on; <b>response genes</b> = genes that change downstream; <b>gene program</b> (P) = a cluster of co-responding genes; <b>perturbation module</b> (M) = a cluster of perturbations with similar responses. Associations below are correlations, not evidence of mediation or causality; methods and references in docs/PERTURBATION_EFFECTS.md.</p>
-<h3>6.1 Perturbation-response score (PS)</h3>{{ pe.info.ps }}{{ pe.ps }}{% for f in figs.pe_ps %}{{ render(f) }}{% endfor %}<details><summary>Targets not scored</summary>{{ pe.ps_skipped }}</details>
-<h3>6.2 lochNESS</h3>{{ pe.info.lochness }}{{ pe.lochness }}{% for f in figs.pe_lochness %}{{ render(f) }}{% endfor %}
-<h3>6.3 Gene programs and perturbation modules</h3>{{ pe.info.modules }}<h4>Perturbation modules</h4>{{ pe.modules }}<h4>Gene programs (top 10 genes per program by |log2FC|)</h4>{{ pe.programs }}{% for f in figs.pe_gene_programs %}{{ render(f) }}{% endfor %}
-<h3>6.4 Protein effects</h3>{{ pe.info.protein }}{{ pe.protein }}{% for f in figs.pe_protein_effects %}{{ render(f) }}{% endfor %}
-<h3>6.5 RNA-protein concordance</h3>{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
-<h3>6.6 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
+<h3>{{ secn.pe }}.1 Perturbation-response score (PS)</h3>{{ pe.info.ps }}{{ pe.ps }}{% for f in figs.pe_ps %}{{ render(f) }}{% endfor %}<details><summary>Targets not scored</summary>{{ pe.ps_skipped }}</details>
+<h3>{{ secn.pe }}.2 lochNESS</h3>{{ pe.info.lochness }}{{ pe.lochness }}{% for f in figs.pe_lochness %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.pe }}.3 Gene programs and perturbation modules</h3>{{ pe.info.modules }}<h4>Perturbation modules</h4>{{ pe.modules }}<h4>Gene programs (top 10 genes per program by |log2FC|)</h4>{{ pe.programs }}{% for f in figs.pe_gene_programs %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.pe }}.4 Protein effects</h3>{{ pe.info.protein }}{{ pe.protein }}{% for f in figs.pe_protein_effects %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.pe }}.5 RNA-protein concordance</h3>{{ pe.info.concordance }}<h4>PS vs protein (cell level, within target)</h4>{{ pe.ps_protein }}<h4>lochNESS vs protein (target level, across targets)</h4>{{ pe.lochness_protein }}<h4>Gene program vs protein (cell level)</h4>{{ pe.program_protein }}<h4>Gene-program effect vs protein effect (target level)</h4>{{ pe.program_protein_targets }}{% for f in figs.pe_concordance %}{{ render(f) }}{% endfor %}
+<h3>{{ secn.pe }}.6 Integrated perturbation summary</h3><div class="scroll">{{ pe.summary }}</div>
 {% endif %}
-<h2 id="outputs">{{ 7 if pe else 6 }}. Outputs and provenance</h2>
+{% if cs %}
+<h2 id="cs">{{ secn.cs }}. Cell states and perturbation enrichment</h2>
+<p class="sub">Leiden clustering divides the cells into discrete transcriptional states using the RNA neighbour graph (guide labels are not used). For each target and cluster, a Fisher exact test asks whether the target's single-guide cells are over- or under-represented in that cluster compared with control cells; ambiguous, multi-guide and unassigned cells are clustered but not tested. This is complementary to lochNESS: cluster enrichment needs discrete cluster boundaries and asks whether a perturbation prefers a defined state, while lochNESS is cluster-free and can see concentration inside one cluster or across cluster boundaries. A perturbation can show either, both or neither; they are not combined. Clusters are numbered, not named, and their number depends on the Leiden resolution.</p>
+<h3>{{ secn.cs }}.1 Clusters</h3>{{ cs.clustering }}{% for f in figs.cs_clusters %}{{ render(f) }}{% endfor %}
+{% if cs.flags %}<div class="warn"><b>Cluster composition warnings</b><ul>{% for f in cs.flags %}<li>{{ f }}</li>{% endfor %}</ul></div>{% endif %}
+<details><summary>Cluster summary (sizes, class composition, dominant sample/lane, median depth)</summary><div class="scroll">{{ cs.summary }}</div></details>
+<h3>{{ secn.cs }}.2 Perturbation x cluster enrichment</h3>{{ cs.enrichment_info }}<h4>Omnibus target x cluster association (screen)</h4>{{ cs.omnibus }}{% for f in figs.cs_enrichment %}{{ render(f) }}{% endfor %}
+<h4>{% if cs.significant_any %}Significant pairs{% else %}Strongest pairs (none significant){% endif %}</h4><div class="scroll">{{ cs.top }}</div>
+<h3>{{ secn.cs }}.3 Cluster enrichment and lochNESS, side by side</h3><p class="sub">Descriptive only: the strongest cluster result and the lochNESS summary per target, without a combined statistic.</p><div class="scroll">{{ cs.comparison }}</div>
+{% endif %}
+<h2 id="outputs">{{ secn.out }}. Outputs and provenance</h2>
 <h3>6.1 Deliverables</h3>{{ tables.outputs }}
 <h3>6.2 Processed object</h3><pre>{{ ctx.adata_repr }}</pre>{{ tables.schema }}
 <h3>6.3 Stage timings (seconds)</h3>{{ tables.timings }}

@@ -1,14 +1,15 @@
-# petrubseq-pipeline-protein -- v0.1 conda environment
+# petrubseq-pipeline-protein conda environment
 #
 # Create / activate:
 #   conda env create -f environment.yml
 #   conda activate petrubseq-protein
 #   pip install -e .
 #
-# Deliberately lighter than weili-lab/perturbseq-pipeline: v0.1 is a
-# processing pipeline (load / align / QC / normalize / embed / summarize),
-# so no leiden/igraph, statsmodels, seaborn, harmony, or GPU stacks (jinja2 only for report.html).
-# Add packages here only when a v0.x stage needs them.
+# Deliberately light: no harmony, seaborn or GPU stacks (jinja2 only for
+# report.html). igraph provides the Leiden clustering of the optional cell-state
+# analysis (scanpy.tl.leiden, igraph backend); statsmodels (a scanpy dependency)
+# provides the optional Cochran-Mantel-Haenszel test. Add packages here only when
+# a stage needs them.
 name: petrubseq-protein
 channels:
   - conda-forge
@@ -26,6 +27,7 @@ dependencies:
   - anndata>=0.10
   - h5py>=3.8
   - umap-learn>=0.5
+  - python-igraph>=0.10    # Leiden clustering (analysis.clustering)
   # plotting
   - matplotlib>=3.7
   # config / utilities

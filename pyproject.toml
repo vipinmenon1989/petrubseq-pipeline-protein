@@ -23,6 +23,7 @@ dependencies = [
     "anndata>=0.10",
     "h5py>=3.8",
     "umap-learn>=0.5",
+    "igraph>=0.10",
     "matplotlib>=3.7",
     "pyyaml>=6.0",
     "tqdm>=4.60",

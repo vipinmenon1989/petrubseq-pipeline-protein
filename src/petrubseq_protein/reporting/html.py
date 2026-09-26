@@ -121,7 +121,42 @@ def write_html(ctx: ReportContext, path: Path, embed: bool = True, max_rows: int
         }
         for st_ in (ST_PS, ST_LOCH, ST_PROG, ST_PROT, ST_CONC):
             figs[f"pe_{st_}"] = reg.by_section(PE_SECTION, st_)
-    html = tpl.render(ctx=ctx, tables=tables, figs=figs, pe=pe_view, render=lambda f: render_figure(f, embed, ctx.run_dir), group_summaries=[(k, df_to_html(v)) for k, v in ctx.group_summaries.items()], n_tables=len(ctx.tables), n_figures=len(reg.records))
+    cs = ctx.extra.get("cell_states")
+    cs_view = None
+    if cs is not None:
+        from .cell_state_plots import SECTION as CS_SECTION
+
+        def _t2(df, cols=None, n=max_rows, index=False):
+            if df is None or getattr(df, "empty", True):
+                return Markup("<p class='sub'>(not computed)</p>")
+            d = df[[c for c in cols if c in df.columns]] if cols else df
+            return df_to_html(d.round(4), max_rows=n, index=index)
+
+        info = cs.info()
+        e = cs.enrichment
+        top = None
+        if e is not None and not e.empty:
+            top = e.table[e.table["significant"]] if e.table["significant"].any() else e.table.head(15)
+        cs_view = {
+            "clustering": kv_table({k: v for k, v in info["clustering"].items() if not isinstance(v, (list, dict))}),
+            "enrichment_info": kv_table({k: v for k, v in info["enrichment"].items() if not isinstance(v, (list, dict))}),
+            "omnibus": kv_table(info["enrichment"].get("omnibus", {})) if isinstance(info["enrichment"].get("omnibus"), dict) else "",
+            "summary": _t2(cs.clustering.summary),
+            "flags": cs.clustering.flags,
+            "top": _t2(top, ["target", "cluster", "direction", "n_target_in_cluster", "n_target_total", "target_cluster_fraction", "n_control_in_cluster", "n_control_total", "control_cluster_fraction", "odds_ratio", "log2_or_haldane", "p_value", "fdr", "low_power", "n_guides_supporting_direction", "n_guides_observed", "cmh_odds_ratio", "cmh_fdr"], 40),
+            "significant_any": bool(e is not None and not e.empty and e.table["significant"].any()),
+            "comparison": _t2(e.lochness_comparison if e is not None else None, None, 60),
+        }
+        for st_ in ("clusters", "enrichment"):
+            figs[f"cs_{st_}"] = reg.by_section(CS_SECTION, st_)
+    secn = {}
+    nxt = 6
+    if pe_view is not None:
+        secn["pe"] = nxt; nxt += 1
+    if cs_view is not None:
+        secn["cs"] = nxt; nxt += 1
+    secn["out"] = nxt
+    html = tpl.render(ctx=ctx, tables=tables, figs=figs, pe=pe_view, cs=cs_view, secn=secn, render=lambda f: render_figure(f, embed, ctx.run_dir), group_summaries=[(k, df_to_html(v)) for k, v in ctx.group_summaries.items()], n_tables=len(ctx.tables), n_figures=len(reg.records))
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(html, encoding="utf-8")

@@ -126,7 +126,8 @@ class _Stages:
 def run_pipeline(cfg: Config) -> PipelineResult:
     t0 = time.time()
     pe_enabled = cfg.analysis.perturbation_effects.enabled
-    st = _Stages(N_STAGES + (1 if pe_enabled else 0))
+    cs_enabled = cfg.analysis.clustering.enabled
+    st = _Stages(N_STAGES + (1 if pe_enabled else 0) + (1 if cs_enabled else 0))
     warnings: List[str] = []
     notes: List[str] = []
     tables: Dict[str, pd.DataFrame] = {}
@@ -416,6 +417,19 @@ def run_pipeline(cfg: Config) -> PipelineResult:
                 warnings.append(f"Gene programs / perturbation modules not computed: {pe_res.modules.info.get('status')}.")
             if pe_res.lochness is not None and pe_res.lochness.info.get("k_capped"):
                 notes.append(f"lochNESS k capped at {pe_res.lochness.info['k_used']} (= {cfg.analysis.perturbation_effects.lochness.max_k_fraction:g} x {adata.n_obs} cells) instead of {cfg.analysis.perturbation_effects.lochness.n_neighbors}.")
+    # 17c (only with analysis.clustering.enabled) ---------------------------
+    cs_res = None
+    if cs_enabled:
+        with st.stage("cell states and perturbation enrichment"):
+            from . import analysis as cs_analysis
+            from .reporting.cell_state_plots import cell_state_figures
+            loch_sum = pe_res.lochness.summary if (pe_res is not None and pe_res.lochness is not None) else None
+            cs_res = cs_analysis.run_cell_states(adata, cfg, loch_sum)
+            cell_state_figures(cs_res, adata, cfg, registry)
+            for f in cs_res.clustering.flags:
+                warnings.append(f"Leiden {f} (see tables/cell_states/cluster_summary.csv).")
+            if cs_res.enrichment is not None and cs_res.enrichment.empty:
+                notes.append(f"Perturbation x cluster enrichment not computed: {cs_res.enrichment.info.get('status')}.")
     # 18 -----------------------------------------------------------------
     with st.stage("processed h5ad"):
         prov = provenance.collect(cfg.source_path, input_rec, extra={"alignment": ares.to_dict(), "run_name": run_name})
@@ -436,8 +450,15 @@ def run_pipeline(cfg: Config) -> PipelineResult:
             "provenance": _jsonable({k: v for k, v in prov.items() if k != "config"}),
             "config": _jsonable(cfg.to_dict()),
         }
+        if pe_res is not None or cs_res is not None:
+            adata.uns["petrubseq_protein"]["analysis"] = {}
         if pe_res is not None:
-            adata.uns["petrubseq_protein"]["analysis"] = {"perturbation_effects": _jsonable(pe_res.info())}
+            adata.uns["petrubseq_protein"]["analysis"]["perturbation_effects"] = _jsonable(pe_res.info())
+        if cs_res is not None:
+            adata.uns["petrubseq_protein"]["analysis"]["cell_states"] = _jsonable(cs_res.info())
+            if cs_res.enrichment is not None and not cs_res.enrichment.empty:
+                from .analysis import _h5
+                adata.uns["perturbation_cluster_enrichment"] = _h5(cs_res.enrichment.table)
         adata.uns["petrubseq_protein"]["schema"] = _jsonable(object_schema(adata, rna_info, prot_info, cfg))
         h5ad_path = None
         if cfg.output.write_h5ad:
@@ -462,6 +483,8 @@ def run_pipeline(cfg: Config) -> PipelineResult:
             tables["protein_pca_loadings"] = adata.uns["pca_protein"]["loadings"]
         if pe_res is not None:
             tables.update(pe_analysis.tables(pe_res))
+        if cs_res is not None:
+            tables.update(cs_analysis.cell_state_tables(cs_res))
         summary = _run_summary(cfg, adata, rna_info, prot_info, pert_qc, n_input, n_prefilter, n_final)
         tables["run_summary"] = pd.Series(summary, name="value").to_frame()
         table_paths: Dict[str, Path] = {}
@@ -472,7 +495,7 @@ def run_pipeline(cfg: Config) -> PipelineResult:
             gz = name in ("cell_qc", "cell_qc_prefilter")
             p = tdir / f"{name}.csv{'.gz' if gz else ''}"
             p.parent.mkdir(parents=True, exist_ok=True)
-            long_form = long_form or (name.startswith("perturbation_effects/") and isinstance(df.index, pd.RangeIndex))
+            long_form = long_form or (name.startswith(("perturbation_effects/", "cell_states/")) and isinstance(df.index, pd.RangeIndex))
             df.to_csv(p, index=not long_form)
             table_paths[name] = p
     # 20 -----------------------------------------------------------------
@@ -507,6 +530,8 @@ def run_pipeline(cfg: Config) -> PipelineResult:
         )
         if pe_res is not None:
             ctx.extra["perturbation_effects"] = pe_res
+        if cs_res is not None:
+            ctx.extra["cell_states"] = cs_res
         write_html(ctx, report_html, embed=cfg.report.embed_figures, max_rows=cfg.report.max_table_rows)
         if report_md:
             write_markdown(ctx, report_md)
@@ -666,6 +691,11 @@ def object_schema(adata: ad.AnnData, rna_info: Dict[str, Any], prot_info: Dict[s
             sch["obsm['X_multimodal']"] = {"shape": shape, "content": f"block-normalized RNA PCs + {cfg.multimodal.protein_weight} x protein PCs", "status": "derived"}
         elif key.startswith("X_umap_"):
             sch[f"obsm['{key}']"] = {"shape": shape, "content": {"X_umap_rna": "UMAP of RNA neighbors", "X_umap_protein": "UMAP of protein neighbors", "X_umap_multimodal": "UMAP of multimodal neighbors"}.get(key, "provided embedding (input)"), "status": "derived" if key != cfg.inputs.embedding.key else "input"}
+    ckey = cfg.analysis.clustering.key
+    if cfg.analysis.clustering.enabled and ckey in adata.obs.columns:
+        sch[f"obs['{ckey}']"] = {"shape": f"{adata.n_obs} cells, {adata.obs[ckey].nunique()} clusters", "content": "Leiden cluster on the RNA neighbour graph (numbered states, not cell types)", "status": "derived (Stage F)"}
+    if "perturbation_cluster_enrichment" in adata.uns:
+        sch["uns['perturbation_cluster_enrichment']"] = {"shape": f"{len(adata.uns['perturbation_cluster_enrichment'])} rows", "content": "target x cluster Fisher enrichment vs controls (odds ratio, p, BH-FDR, direction, guide support)", "status": "derived (Stage F)"}
     if "guide_features" in adata.uns:
         sch["uns['guide_features']"] = {"shape": f"{len(adata.uns['guide_features'])} rows", "content": "one row per guide: target, control_class, total_umis, n_cells_detected, n_cells_dominant (+ 10x feature columns)"}
     sch["uns['protein_features']"] = {"shape": f"{len(adata.uns['protein_features'])} rows" if "protein_features" in adata.uns else "", "content": "one row per antibody: role, isotype control, presence in each matrix, used_in_embedding/used_in_qc"}

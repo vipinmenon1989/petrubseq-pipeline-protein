@@ -217,6 +217,18 @@ def main() -> int:
             t = adata.uns["protein_effects"]
             check("protein effects on normalized values", pe.get("protein", {}).get("representation") != "protein_counts", str(pe.get("protein", {}).get("representation")))
             check("protein-effect FDR in [0, 1]", bool(t["fdr"].astype(float).between(0, 1).all()), f"{len(t)} tests")
+    # --- Stage F (only when analysis.clustering ran) -------------------------------
+    csi = u.get("analysis", {}).get("cell_states") if isinstance(u.get("analysis"), dict) else None
+    if csi:
+        ck = csi.get("clustering", {}).get("key", "leiden")
+        check("cluster labels present and categorical", ck in obs.columns and obs[ck].dtype.name == "category", f"obs['{ck}']")
+        if ck in obs.columns:
+            check("every cell has a cluster", bool(obs[ck].notna().all()), f"{obs[ck].nunique()} clusters")
+            check("cluster count recorded", int(csi["clustering"].get("n_clusters", -1)) == obs[ck].nunique())
+        if "perturbation_cluster_enrichment" in adata.uns:
+            e = adata.uns["perturbation_cluster_enrichment"]
+            check("enrichment FDR in [0, 1]", bool(e["fdr"].astype(float).between(0, 1).all()), f"{len(e)} tests")
+            check("enrichment counts consistent", bool((e["n_target_in_cluster"].astype(int) <= e["n_target_total"].astype(int)).all() and (e["n_control_in_cluster"].astype(int) <= e["n_control_total"].astype(int)).all()))
     if "lane_id" in obs.columns:
         check("lane columns consistent", "barcode_original" in obs.columns and bool(obs["lane_id"].astype(str).ne("").all()), f"{obs['lane_id'].nunique()} lanes")
     # --- print ------------------------------------------------------------------------

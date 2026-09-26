@@ -10,6 +10,10 @@ The behavioural reference is the group's `weili-lab/perturbseq-pipeline`
 (PS to 4e-16, lochNESS and the effect matrix exactly, identical program / module
 partitions on the same input).
 
+Discrete cell states (Leiden) and perturbation × cluster enrichment are a separate,
+independent analysis (Stage F, `analysis.clustering`): `docs/CELL_STATES.md`. lochNESS
+below is the cluster-free counterpart.
+
 ## Concepts
 
 | term | meaning |

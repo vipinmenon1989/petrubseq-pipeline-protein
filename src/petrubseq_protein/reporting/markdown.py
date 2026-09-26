@@ -55,9 +55,16 @@ def write_markdown(ctx: ReportContext, path: Path) -> Path:
     for name, df in ctx.group_summaries.items():
         s += [f"### {name} summary", "", md_table(df), ""]
     pe = ctx.extra.get("perturbation_effects")
+    secn = {}
+    nxt = 6
+    if pe is not None:
+        secn["pe"] = nxt; nxt += 1
+    if ctx.extra.get("cell_states") is not None:
+        secn["cs"] = nxt; nxt += 1
+    secn["out"] = nxt
     if pe is not None:
         from .perturbation_plots import SECTION as PE, ST_CONC, ST_LOCH, ST_PROG, ST_PROT, ST_PS
-        s += ["## 6. Perturbation effects", "", "Perturbed = single-guide targeting cells of one target; controls = single-guide non-targeting cells; ambiguous / multi-guide cells excluded. Associations are correlations, not mediation or causality (docs/PERTURBATION_EFFECTS.md).", ""]
+        s += [f"## {secn['pe']}. Perturbation effects", "", "Perturbed = single-guide targeting cells of one target; controls = single-guide non-targeting cells; ambiguous / multi-guide cells excluded. Associations are correlations, not mediation or causality (docs/PERTURBATION_EFFECTS.md).", ""]
         for title, r, df, st_ in (("PS", pe.ps, pe.ps.summary if pe.ps else None, ST_PS), ("lochNESS", pe.lochness, pe.lochness.summary if pe.lochness else None, ST_LOCH),
                                   ("Gene programs and perturbation modules", pe.modules, pe.modules.perturbation_modules if pe.modules is not None and not pe.modules.empty else None, ST_PROG),
                                   ("Protein effects", pe.protein, pe.protein.table if pe.protein is not None and not pe.protein.empty else None, ST_PROT),
@@ -65,7 +72,16 @@ def write_markdown(ctx: ReportContext, path: Path) -> Path:
             s += [f"### {title}", "", kv({k: v for k, v in (r.info if r is not None else {"status": "disabled"}).items() if not isinstance(v, (list, dict))}), "", md_table(df.round(4) if df is not None else None, index=False, max_rows=40), "", _figs(ctx, PE, st_), ""]
         if pe.concordance is not None:
             s += ["### Integrated perturbation summary", "", md_table(pe.concordance.summary.round(4), index=False, max_rows=60), ""]
-    s += [f"## {7 if pe is not None else 6}. Outputs and provenance", "", kv(ctx.outputs), "", "```", ctx.adata_repr, "```", "", "| slot | shape | content | status | provenance |", "|---|---|---|---|---|"]
+    cs = ctx.extra.get("cell_states")
+    if cs is not None:
+        s += [f"## {secn['cs']}. Cell states and perturbation enrichment", "", "Leiden clusters on the RNA neighbour graph (guide labels not used); per target x cluster Fisher exact test of single-guide cells vs controls. Complementary to lochNESS (cluster-free); not combined.", "", kv({k: v for k, v in cs.clustering.info.items() if not isinstance(v, (list, dict))}), ""]
+        s += [f"- warning: {f}" for f in cs.clustering.flags] + [""]
+        s += [md_table(cs.clustering.summary.round(3), index=False, max_rows=60), "", _figs(ctx, "cell_states", "clusters"), ""]
+        e = cs.enrichment
+        if e is not None and not e.empty:
+            top = e.table[e.table["significant"]] if e.table["significant"].any() else e.table.head(15)
+            s += [kv({k: v for k, v in e.info.items() if not isinstance(v, (list, dict))}), "", md_table(top.round(4), index=False, max_rows=40), "", _figs(ctx, "cell_states", "enrichment"), "", "### Cluster enrichment and lochNESS (descriptive)", "", md_table(e.lochness_comparison.round(4), index=False, max_rows=60), ""]
+    s += [f"## {secn['out']}. Outputs and provenance", "", kv(ctx.outputs), "", "```", ctx.adata_repr, "```", "", "| slot | shape | content | status | provenance |", "|---|---|---|---|---|"]
     s += [f"| `{k}` | {d.get('shape','')} | {d.get('content','')} | {d.get('status','')} | {d.get('provenance','')} |" for k, d in ctx.schema.items()]
     s += ["", "### Stage timings (seconds)", "", kv({k: round(v, 1) for k, v in ctx.timings.items()}), "", "### Software versions", "", kv(ctx.versions), "", "### Provenance", "", kv({k: v for k, v in ctx.provenance.items() if k not in ("packages", "inputs", "config")}), ""]
     path = Path(path)

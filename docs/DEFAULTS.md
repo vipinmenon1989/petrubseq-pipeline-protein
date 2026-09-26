@@ -204,3 +204,22 @@ parameter with no principled default, so it is left to the analysis phase.
 | `protein.representation` | `protein` | the primary normalized protein matrix (CLR of counts by default); never counts |
 | `protein.min_cells_per_target` / `min_control_cells` / `fdr_alpha` | 10 / 10 / 0.05 | same support rule as PS |
 | `concordance.min_cells` / `fdr_alpha` | 20 / 0.05 | minimum cells for a within-target Spearman correlation |
+
+## Cell states and perturbation × cluster enrichment (`analysis.clustering`, Stage F; off by default)
+
+| key | default | rationale |
+|---|---|---|
+| `enabled` | `false` | opt-in; preprocessing and Stage E are unchanged without it |
+| `key` | `leiden` | obs column for the labels; an existing column is an error unless `overwrite: true` |
+| `resolution` | 1.0 | reference (weili-lab/perturbseq-pipeline) default; results are conditional on it |
+| `n_iterations` | 2 | reference; `-1` iterates until convergence |
+| `neighbors_key` | `rna` | the RNA neighbour graph of the representation stage (no second preprocessing) |
+| `enrichment.control` | `non_targeting` | same control rule as every perturbation analysis; `other` (all other targets) is the reference default, available explicitly |
+| `enrichment.control_classes` | `[non_targeting]` | control classes counted as controls |
+| `enrichment.min_cells_per_target` / `min_cells_per_cluster` / `min_control_cells` | 10 / 20 / 10 | reference |
+| `enrichment.min_control_cells_in_cluster` | 10 | reference `min_reference_cells` (low-power flag) |
+| `enrichment.min_cells_per_guide` | 5 | reference guide-concordance minimum |
+| `enrichment.odds_pseudocount` | 0.5 | Haldane-Anscombe, display/ranking only; the Fisher odds ratio is stored unchanged |
+| `enrichment.fdr_alpha` | 0.05 | BH over all tested (target, cluster) pairs of the run |
+| `enrichment.stratify_by` | null | any obs column; adds a CMH test beside Fisher (own BH family) |
+| `enrichment.n_permutations` | 1000 | omnibus permutation p-value (reference) |

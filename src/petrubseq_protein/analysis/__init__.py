@@ -124,3 +124,49 @@ def tables(res: PerturbationEffects) -> Dict[str, pd.DataFrame]:
             if df is not None and not df.empty:
                 out[f"{d}/{name}"] = df
     return {k: v for k, v in out.items() if v is not None}
+
+
+# ---------------------------------------------------------------------------
+# Stage F: cell states (Leiden) and perturbation x cluster enrichment
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CellStates:
+    clustering: Any = None
+    enrichment: Any = None
+
+    def info(self) -> Dict[str, Any]:
+        return {"clustering": dict(self.clustering.info) if self.clustering is not None else {"status": "disabled"},
+                "enrichment": dict(self.enrichment.info) if self.enrichment is not None else {"status": "disabled"}}
+
+
+def run_cell_states(adata: ad.AnnData, cfg: Config, lochness_summary: Optional[pd.DataFrame] = None) -> CellStates:
+    """Leiden clustering (writes ``obs[analysis.clustering.key]``) and, if enabled, enrichment."""
+    from .cluster_enrichment import compute_cluster_enrichment
+    from .clustering import compute_clustering
+
+    cl = cfg.analysis.clustering
+    res = CellStates(clustering=compute_clustering(adata, cfg))
+    if cl.enrichment.enabled:
+        res.enrichment = compute_cluster_enrichment(adata, cfg, cl.key, lochness_summary)
+    return res
+
+
+def cell_state_tables(res: CellStates) -> Dict[str, pd.DataFrame]:
+    d = "cell_states"
+    out: Dict[str, pd.DataFrame] = {}
+    c = res.clustering
+    if c is not None:
+        out[f"{d}/cluster_summary"] = c.summary
+        out[f"{d}/cluster_composition_by_class"] = c.by_class
+        out[f"{d}/cluster_composition_by_target"] = c.by_target
+        for col, tab in c.by_design.items():
+            out[f"{d}/cluster_composition_by_{col}"] = tab
+    e = res.enrichment
+    if e is not None and not e.empty:
+        out[f"{d}/perturbation_cluster_enrichment"] = e.table
+        out[f"{d}/cluster_enrichment_vs_lochness"] = e.lochness_comparison
+    if e is not None and e.skipped is not None and len(e.skipped):
+        out[f"{d}/cluster_enrichment_skipped"] = e.skipped
+    return out
