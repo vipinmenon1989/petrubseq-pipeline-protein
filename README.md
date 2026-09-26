@@ -1,6 +1,6 @@
 # petrubseq-pipeline-protein
 
-A reproducible Perturb-seq / Perturb-CITE-seq pipeline for RNA, CRISPR guide and
+A reproducible Perturb-CITE-seq pipeline for RNA, CRISPR guide and
 optional ADT/protein measurements: input harmonization, QC, guide assignment,
 RNA/protein preprocessing, Leiden clustering, perturbation-response analysis,
 gene programs, protein effects and a self-contained report, in one command.
